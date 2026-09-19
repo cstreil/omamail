@@ -100,16 +100,25 @@ slices rather than being implied by recipient suggestions.
 The UI-facing methods use product concepts rather than protocol names. API 6
 extends the existing `contacts.suggest` method with the optional shape
 `{"accountId":"..."}`; the released `{}` request remains local-only and unchanged.
-This lets the first vertical slice reuse the composer without prematurely
-publishing an address-book protocol.
+The same unreleased revision carries the read-only address-book surface the
+contact view needs:
 
-Later address-book slices are expected to need the methods below. Their exact
-request/response shapes and API revision must be fixed in `backend-api.json`
-only when QML has a real consumer for them.
+- `contacts.suggest`: optional `{"accountId"}`; local plus remote suggestions
+- `contacts.sources`: `{"accountId"}` -> `{sources:[{id,name,default,subscribed,readOnly}]}`
+- `contacts.list`: `{"accountId","source","query"?,"limit"?,"position"?}` ->
+  `{contacts:[{id,name,emails,source}],total,position}`; 50 rows by default,
+  200 at most, and ordering comes from the backend because the server supports
+  no contact sort
+- `contacts.get`: `{"accountId","id"}` ->
+  `{contact:{id,source,name,emails,phones,addresses}}` with labeled entries
 
-- `contacts.sources`: available address books for an account
-- `contacts.list`: cached or freshly synchronized contact summaries
-- `contacts.get`: one complete normalized contact
+Accounts without the JMAP contacts capability answer `contacts.sources` and
+`contacts.list` with an empty result rather than an error, so a mixed account
+list needs no provider branching in QML. Unknown accounts, unknown sources and
+unknown ids have their own stable errors.
+
+Not implemented yet; these need their own revision and a real consumer:
+
 - `contacts.create`: create a contact in a writable source
 - `contacts.update`: update with the last known JMAP state
 - `contacts.delete`: destroy with the last known JMAP state

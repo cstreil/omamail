@@ -88,6 +88,9 @@
     "cache.calendarRead",
     "cache.calendarPut",
     "contacts.suggest",
+    "contacts.sources",
+    "contacts.list",
+    "contacts.get",
     "attachment.read",
     "attachment.store",
     "attachment.storeUpload",
@@ -769,12 +772,97 @@
       "equals": {
         "": []
       }
+    },
+    {
+      "name": "contact sources require a registered account",
+      "method": "contacts.sources",
+      "params": {
+        "accountId": "absent@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "contacts_account_unknown"
+      }
+    },
+    {
+      "name": "contact sources are empty without a JMAP account",
+      "method": "contacts.sources",
+      "params": {
+        "accountId": "contract@example.org"
+      },
+      "equals": {
+        "sources": []
+      },
+      "types": {
+        "sources": "array"
+      }
+    },
+    {
+      "name": "contact list is empty without a JMAP account",
+      "method": "contacts.list",
+      "params": {
+        "accountId": "contract@example.org",
+        "source": "contract-book"
+      },
+      "equals": {
+        "contacts": [],
+        "total": 0,
+        "position": 0
+      }
+    },
+    {
+      "name": "contact list rejects unknown fields",
+      "method": "contacts.list",
+      "params": {
+        "accountId": "contract@example.org",
+        "source": "contract-book",
+        "unknown": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "contact list rejects an oversized page",
+      "method": "contacts.list",
+      "params": {
+        "accountId": "contract@example.org",
+        "source": "contract-book",
+        "limit": 201
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "contact detail is unsupported without a JMAP account",
+      "method": "contacts.get",
+      "params": {
+        "accountId": "contract@example.org",
+        "id": "contract-card"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "contacts_not_supported"
+      }
     }
   ],
   "unreleased": {
-    "methods": [],
+    "methods": [
+      "contacts.sources",
+      "contacts.list",
+      "contacts.get"
+    ],
     "cases": [
-      "account-scoped contact suggestions"
+      "account-scoped contact suggestions",
+      "contact sources require a registered account",
+      "contact sources are empty without a JMAP account",
+      "contact list is empty without a JMAP account",
+      "contact list rejects unknown fields",
+      "contact list rejects an oversized page",
+      "contact detail is unsupported without a JMAP account"
     ]
   }
 }

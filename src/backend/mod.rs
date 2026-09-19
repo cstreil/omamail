@@ -1,3 +1,4 @@
+mod contacts;
 mod content;
 pub(crate) mod mail;
 mod methods;
@@ -250,45 +251,8 @@ impl Session {
                 .await
                 .map_err(|_| "worker_failed")?;
         }
-        if method == "contacts.suggest" {
-            let fields = params.as_object().ok_or("invalid_params")?;
-            if fields.keys().any(|key| key != "accountId") {
-                return Err("invalid_params");
-            }
-            let Some(value) = fields.get("accountId") else {
-                return tokio::task::spawn_blocking(crate::contacts::suggest)
-                    .await
-                    .map_err(|_| "worker_failed")?;
-            };
-            let account_id = match value.as_str() {
-                Some(value)
-                    if !value.is_empty()
-                        && value.len() <= 512
-                        && !value.chars().any(char::is_control) =>
-                {
-                    value.to_owned()
-                }
-                _ => return Err("invalid_params"),
-            };
-            // The registry read and the local harvest are both blocking file
-            // work, so they share one worker and never stall an async worker.
-            let lookup = account_id.clone();
-            let (provider, local) = tokio::task::spawn_blocking(move || {
-                let accounts = crate::account::list_readonly()?;
-                let account = accounts["accounts"]
-                    .as_array()
-                    .and_then(|accounts| accounts.iter().find(|entry| entry["id"] == lookup))
-                    .ok_or("contacts_account_unknown")?;
-                let provider = account["provider"].as_str().ok_or("accounts_invalid")?;
-                Ok::<_, &'static str>((provider.to_owned(), crate::contacts::suggest()?))
-            })
-            .await
-            .map_err(|_| "worker_failed")??;
-            if provider != "jmap" {
-                return Ok(local);
-            }
-            let remote = self.jmap.contact_suggestions(&account_id).await?;
-            return crate::contacts::merge(&local, &remote);
+        if method.starts_with("contacts.") {
+            return Box::pin(contacts::call(self, method, params)).await;
         }
         if matches!(method, "public.image" | "public.unsubscribe") {
             let fields = params.as_object().ok_or("invalid_params")?;

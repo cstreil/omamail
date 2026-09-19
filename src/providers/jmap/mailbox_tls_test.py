@@ -121,18 +121,22 @@ with contextlib.nullcontext(pathlib.Path(__file__).parent.parent / "testdata" / 
                     if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"] or args.get("accountId")!="contacts-account": replies.append(["error",{"type":"accountNotFound"},id]);continue
                     result={"list":[
                         {"id":"hidden","name":"Hidden","isDefault":True,"isSubscribed":True,"myRights":{"mayRead":False}},
-                        {"id":"book","name":"Contacts","isDefault":True,"isSubscribed":True,"myRights":{"mayRead":True}}
+                        {"id":"book","name":"Contacts","isDefault":True,"isSubscribed":True,"myRights":{"mayRead":True,"mayWrite":True}}
                     ],"state":"books-1"}
                 elif method=="ContactCard/query":
                     if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"] or args.get("accountId")!="contacts-account" or args.get("filter",{}).get("inAddressBook")!="book": replies.append(["error",{"type":"invalidArguments"},id]);continue
-                    result={"ids":["contact-1","contact-2"],"position":0,"queryState":"query-1","canCalculateChanges":True}
+                    text=str(args.get("filter",{}).get("text","")).lower()
+                    if text and not any(needle in text for needle in ("alice","bob")):
+                        result={"ids":[],"position":0,"total":0,"queryState":"query-1"}
+                    else:
+                        result={"ids":["contact-1","contact-2"],"position":0,"total":2,"queryState":"query-1","canCalculateChanges":True}
                 elif method=="ContactCard/get":
                     if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"] or args.get("accountId")!="contacts-account": replies.append(["error",{"type":"invalidArguments"},id]);continue
                     cards={
-                        "contact-1":{"id":"contact-1","addressBookIds":{"book":True},"name":{"full":"Alice"},"emails":{"a":{"address":"alice@example.test"}}},
-                        "contact-2":{"id":"contact-2","addressBookIds":{"book":True},"name":{"full":"Bob"},"emails":{"a":{"address":"bob@example.test"},"b":{"address":"BOB@example.test"}},"phones":{"p":{"number":"synthetic-secret"}}}
+                        "contact-1":{"id":"contact-1","addressBookIds":{"book":True},"name":{"full":"Alice","components":[{"kind":"given","value":"Alice"}]},"emails":{"a":{"address":"alice@example.test"}},"phones":{},"addresses":{}},
+                        "contact-2":{"id":"contact-2","addressBookIds":{"book":True},"name":{"full":"Bob","components":[{"kind":"given","value":"Bob"},{"kind":"surname","value":"Example"}]},"emails":{"a":{"address":"bob@example.test","contexts":{"work":True}},"b":{"address":"BOB@example.test"}},"phones":{"p":{"number":"+49-000-000001","label":"mobile"}},"addresses":{"a":{"components":[{"kind":"street","value":"Example Street 1"},{"kind":"locality","value":"Example City"}]}}}
                     }
-                    result={"list":[cards[v] for v in args.get("ids",[])],"state":"cards-1"}
+                    result={"list":[cards[v] for v in args.get("ids",[]) if v in cards],"state":"cards-1"}
                 else: replies.append(["error",{"type":"unknownMethod"},id]);continue
                 replies.append([method,result,id])
             self.answer({"methodResponses":None if scenario=="bad-envelope" else replies,"sessionState":"s1"})
