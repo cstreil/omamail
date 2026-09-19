@@ -94,8 +94,10 @@ and optimistic presentation only where rollback is complete and tested.
 - QML tests for navigation, source selection, search, validation, editor state,
   conflict presentation and recipient-picker reuse.
 - Standalone composition tests because the feature is shared by both hosts.
-- `make validate`, `cargo test --locked --lib`, `make test-backend-process`,
-  and the standalone Linux gate on the final implementation commit.
+- `LC_ALL=C make validate`, `cargo test --locked --lib`,
+  `make test-backend-process`, and the standalone Linux gate on the final
+  implementation commit. The explicit locale keeps the release-script sort
+  fixture deterministic on this development machine.
 - Live round trips against a dedicated test address book: server to client,
   client to server, concurrent update conflict, delete, restart and offline
   recovery. No personal contact data belongs in fixtures, screenshots or logs.
