@@ -171,6 +171,8 @@ DropArea {
 
   readonly property var contactBook: root.service
     && Array.isArray(root.service.recipientContacts)
+    && (String(root.service.recipientContactsAccountId || "") === ""
+      || String(root.service.recipientContactsAccountId) === root.accountId)
     ? root.service.recipientContacts : []
 
   readonly property var fromAliases: {
@@ -587,7 +589,7 @@ DropArea {
     placeBody()
 
     selectPreferredFrom()
-    if (root.service) root.service.refreshRecipientContacts()
+    if (root.service) root.service.refreshRecipientContacts(root.accountId)
     userModified = false
 
     // Focus is not placed here. Opening this changes the window's key context,

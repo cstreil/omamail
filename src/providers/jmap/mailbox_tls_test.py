@@ -117,6 +117,22 @@ with contextlib.nullcontext(pathlib.Path(__file__).parent.parent / "testdata" / 
                     missing={"no-archive":"archive","no-trash":"trash","no-inbox":"inbox"}.get(scenario)
                     result["list"]=[box for box in result["list"] if box["role"]!=missing]
                     if scenario=="roles": result["list"][0]["id"]="NEW"
+                elif method=="AddressBook/get":
+                    if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"] or args.get("accountId")!="contacts-account": replies.append(["error",{"type":"accountNotFound"},id]);continue
+                    result={"list":[
+                        {"id":"hidden","name":"Hidden","isDefault":True,"isSubscribed":True,"myRights":{"mayRead":False}},
+                        {"id":"book","name":"Contacts","isDefault":True,"isSubscribed":True,"myRights":{"mayRead":True}}
+                    ],"state":"books-1"}
+                elif method=="ContactCard/query":
+                    if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"] or args.get("accountId")!="contacts-account" or args.get("filter",{}).get("inAddressBook")!="book": replies.append(["error",{"type":"invalidArguments"},id]);continue
+                    result={"ids":["contact-1","contact-2"],"position":0,"queryState":"query-1","canCalculateChanges":True}
+                elif method=="ContactCard/get":
+                    if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"] or args.get("accountId")!="contacts-account": replies.append(["error",{"type":"invalidArguments"},id]);continue
+                    cards={
+                        "contact-1":{"id":"contact-1","addressBookIds":{"book":True},"name":{"full":"Alice"},"emails":{"a":{"address":"alice@example.test"}}},
+                        "contact-2":{"id":"contact-2","addressBookIds":{"book":True},"name":{"full":"Bob"},"emails":{"a":{"address":"bob@example.test"},"b":{"address":"BOB@example.test"}},"phones":{"p":{"number":"synthetic-secret"}}}
+                    }
+                    result={"list":[cards[v] for v in args.get("ids",[])],"state":"cards-1"}
                 else: replies.append(["error",{"type":"unknownMethod"},id]);continue
                 replies.append([method,result,id])
             self.answer({"methodResponses":None if scenario=="bad-envelope" else replies,"sessionState":"s1"})

@@ -251,12 +251,44 @@ impl Session {
                 .map_err(|_| "worker_failed")?;
         }
         if method == "contacts.suggest" {
-            if params != &json!({}) {
+            let fields = params.as_object().ok_or("invalid_params")?;
+            if fields.keys().any(|key| key != "accountId") {
                 return Err("invalid_params");
             }
-            return tokio::task::spawn_blocking(crate::contacts::suggest)
-                .await
-                .map_err(|_| "worker_failed")?;
+            let Some(value) = fields.get("accountId") else {
+                return tokio::task::spawn_blocking(crate::contacts::suggest)
+                    .await
+                    .map_err(|_| "worker_failed")?;
+            };
+            let account_id = match value.as_str() {
+                Some(value)
+                    if !value.is_empty()
+                        && value.len() <= 512
+                        && !value.chars().any(char::is_control) =>
+                {
+                    value.to_owned()
+                }
+                _ => return Err("invalid_params"),
+            };
+            // The registry read and the local harvest are both blocking file
+            // work, so they share one worker and never stall an async worker.
+            let lookup = account_id.clone();
+            let (provider, local) = tokio::task::spawn_blocking(move || {
+                let accounts = crate::account::list_readonly()?;
+                let account = accounts["accounts"]
+                    .as_array()
+                    .and_then(|accounts| accounts.iter().find(|entry| entry["id"] == lookup))
+                    .ok_or("contacts_account_unknown")?;
+                let provider = account["provider"].as_str().ok_or("accounts_invalid")?;
+                Ok::<_, &'static str>((provider.to_owned(), crate::contacts::suggest()?))
+            })
+            .await
+            .map_err(|_| "worker_failed")??;
+            if provider != "jmap" {
+                return Ok(local);
+            }
+            let remote = self.jmap.contact_suggestions(&account_id).await?;
+            return crate::contacts::merge(&local, &remote);
         }
         if matches!(method, "public.image" | "public.unsubscribe") {
             let fields = params.as_object().ok_or("invalid_params")?;
@@ -433,7 +465,7 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
     match method {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
-            "protocol": 1, "apiVersion": 5, "methods": methods::available(),
+            "protocol": 1, "apiVersion": 6, "methods": methods::available(),
             "capabilities": {"agent": cfg!(all(feature = "agent", target_os = "linux"))}
         })),
         "system.quit" => Ok(json!({"quitReady": true})),
@@ -463,6 +495,22 @@ mod api_contract_tests {
             })
             .collect();
         assert_eq!(info["methods"], json!(expected));
+    }
+
+    #[tokio::test]
+    async fn contact_account_params_are_rejected_before_account_or_network_access() {
+        let session = Session::default();
+        for params in [
+            json!({"accountId":"jmap:user@example.test","extra":true}),
+            json!({"accountId":""}),
+            json!({"accountId":"jmap:user@example.test\nInjected"}),
+            json!({"accountId":7}),
+        ] {
+            assert_eq!(
+                session.dispatch("contacts.suggest", &params).await,
+                Err("invalid_params")
+            );
+        }
     }
 }
 

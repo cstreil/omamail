@@ -65,7 +65,7 @@ Item {
     pluginDir: root.pluginDir
     bundledExecutable: root.standalone ? String(root.platform.backendPath || "") : ""
     bundledVersion: root.standalone ? root.version : ""
-    bundledApiVersion: root.standalone ? 5 : 0
+    bundledApiVersion: root.standalone ? 6 : 0
     bundledMode: root.standalone
     developmentExecutable: root.standalone ? "" : (Quickshell.env("OMAMAIL_BIN") || "")
     onValidated: Qt.callLater(rustBackend.reconcileProcess)
@@ -107,6 +107,7 @@ Item {
   readonly property bool backendNeedsUpdate: backend.needsUpdate
   // Event suggestions require API 2 regardless of when that API is released.
   readonly property bool backendCanSuggestEvents: backend.ready && backend.apiVersion >= 2
+  readonly property bool backendCanSuggestRemoteContacts: backend.ready && backend.apiVersion >= 6
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
 
@@ -367,19 +368,41 @@ Item {
   // be what takes the icon away.
   readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
 
-  // Thunderbird and Betterbird keep both explicit and learned addresses in
-  // their local profile. The helper reads those databases without modifying
-  // them. Nothing is copied into Omamail's settings or cache.
+  // Local profiles and, from API 6, the selected JMAP account supply this
+  // bounded recipient projection. The owner prevents a late response for one
+  // mailbox from appearing in a compose window for another mailbox.
   property var recipientContacts: []
+  property string recipientContactsAccountId: ""
   property bool contactsLoading: false
+  property int contactsRequestGeneration: 0
 
-  function refreshRecipientContacts() {
-    if (contactsLoading || !backend || !backend.ready) return
-    contactsLoading = true
-    backend.call("contacts.suggest", {}, function(result, error) {
+  function requestRecipientContacts(params, ownerId, generation, allowLocalFallback) {
+    backend.call("contacts.suggest", params, function(result, error) {
+      if (generation !== root.contactsRequestGeneration) return
+      if (error && allowLocalFallback) {
+        root.requestRecipientContacts({}, "", generation, false)
+        return
+      }
       root.contactsLoading = false
-      if (!error && Array.isArray(result)) root.recipientContacts = result
+      if (!error && Array.isArray(result)) {
+        root.recipientContactsAccountId = ownerId
+        root.recipientContacts = result
+      }
     })
+  }
+
+  function refreshRecipientContacts(accountId) {
+    if (!backend || !backend.ready) return
+    var ownerId = accountId === undefined || accountId === null ? "" : String(accountId)
+    var remote = backendCanSuggestRemoteContacts && ownerId !== ""
+    var generation = ++contactsRequestGeneration
+    contactsLoading = true
+    if (recipientContactsAccountId !== (remote ? ownerId : "")) {
+      recipientContacts = []
+      recipientContactsAccountId = remote ? ownerId : ""
+    }
+    requestRecipientContacts(remote ? { accountId: ownerId } : {}, remote ? ownerId : "",
+      generation, remote)
   }
 
   function registerMailtoHandler() {
@@ -2570,7 +2593,10 @@ Item {
     }
   }
 
-  onActiveAccountIdChanged: refreshCurrent()
+  onActiveAccountIdChanged: {
+    refreshCurrent()
+    refreshRecipientContacts(activeAccountId)
+  }
   onAccountListChanged: Qt.callLater(refreshCurrent)
 
   FileView {
@@ -2747,9 +2773,12 @@ Item {
       if (root.backend.ready) {
         if (root.accountsSaveQueued) root.saveAccounts(root.accountsSaveQueuedAllowDrop ? { allowDrop: true } : undefined)
         else root.restoreAccountRegistry()
-        root.refreshRecipientContacts()
+        root.refreshRecipientContacts(root.activeAccountId)
       }
-      else root.contactsLoading = false
+      else {
+        root.contactsRequestGeneration += 1
+        root.contactsLoading = false
+      }
     }
   }
 
@@ -2761,7 +2790,7 @@ Item {
 
   Component.onCompleted: {
     Qt.callLater(root.restoreAccountRegistry)
-    Qt.callLater(root.refreshRecipientContacts)
+    Qt.callLater(function() { root.refreshRecipientContacts(root.activeAccountId) })
     Qt.callLater(root.registerMailtoHandler)
   }
 }

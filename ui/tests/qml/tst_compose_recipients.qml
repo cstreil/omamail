@@ -25,6 +25,7 @@ Item {
       ({ name: "Second Person", email: "second@example.com" }),
       ({ name: "Third Person", email: "third@example.com" })
     ]
+    property string recipientContactsAccountId: ""
     property var sendAsAliases: []
     property var sendIdentities: []
     property string accountEmail: "me@example.com"
@@ -85,9 +86,20 @@ Item {
       mailService.lastSent = null
       mailService.sendIdentities = []
       mailService.activeAccountId = "me@example.com"
+      mailService.recipientContactsAccountId = ""
       mailService.switchedTo = ""
       compose.reset()
       compose.opened = false
+    }
+
+    function test_contact_book_never_crosses_account_boundary() {
+      compose.accountId = "me@example.com"
+      mailService.recipientContactsAccountId = "other@example.com"
+      compare(compose.contactBook.length, 0)
+      mailService.recipientContactsAccountId = "me@example.com"
+      compare(compose.contactBook.length, 3)
+      mailService.recipientContactsAccountId = ""
+      compare(compose.contactBook.length, 3, "local suggestions are account-independent")
     }
 
     function test_arrows_choose_a_recipient_and_the_popup_stays_above_the_body() {

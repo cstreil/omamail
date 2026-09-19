@@ -1,5 +1,5 @@
 {
-  "apiVersion": 5,
+  "apiVersion": 6,
   "releasedApiVersion": 5,
   "protocolVersion": 1,
   "methods": [
@@ -759,10 +759,22 @@
       "types": {
         "ticket": "string"
       }
+    },
+    {
+      "name": "account-scoped contact suggestions",
+      "method": "contacts.suggest",
+      "params": {
+        "accountId": "contract@example.org"
+      },
+      "equals": {
+        "": []
+      }
     }
   ],
   "unreleased": {
     "methods": [],
-    "cases": []
+    "cases": [
+      "account-scoped contact suggestions"
+    ]
   }
 }

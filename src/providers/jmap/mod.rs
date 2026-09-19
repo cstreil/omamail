@@ -10,6 +10,7 @@ use tokio::{
 };
 
 mod check;
+mod contacts;
 mod discovery;
 mod mailbox;
 pub(crate) use mailbox::validate_action_id;
