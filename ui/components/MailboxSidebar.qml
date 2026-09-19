@@ -21,6 +21,7 @@ Item {
   required property string panelFontFamily
   property bool collapsed: false
   property bool calendarSelected: false
+  property bool contactsSelected: false
   property string menuLabelPath: ""
 
   signal mailboxSelected(string key)
@@ -30,6 +31,7 @@ Item {
   // names), its path, and where the menu goes.
   signal labelMenuRequested(string labelId, string path, real sceneX, real sceneY)
   signal calendarRequested()
+  signal contactsRequested()
 
   // The numbered list App.qml also gives the keys, so a badge and the key that
   // opens the row it sits on cannot disagree.
@@ -88,7 +90,7 @@ Item {
           // is waiting; the labels below still count, because those are lists
           // the user built and their sizes mean something.
           count: 0
-          selected: !root.calendarSelected && !!root.service
+          selected: !root.calendarSelected && !root.contactsSelected && !!root.service
             && root.service.mailboxKey === modelData.key
             && root.service.searchQuery === "" && root.service.rawQuery === ""
           slotNumber: Model.slotNumberOf(root.slots, "mailbox", modelData.key)
@@ -142,7 +144,8 @@ Item {
           slotNumber: modelData.selectable ? Model.slotNumberOf(root.slots, "label", modelData.id) : 0
           count: modelData.unread
           selected: root.menuLabelPath === modelData.path
-            || (modelData.selectable && !root.calendarSelected && !!root.service
+            || (modelData.selectable && !root.calendarSelected && !root.contactsSelected
+              && !!root.service
               && root.service.rawQuery !== ""
               && root.service.rawLabelId === modelData.id)
           onActivated: {
@@ -161,6 +164,14 @@ Item {
     anchors.left: parent.left
     anchors.right: edge.left
     anchors.bottom: parent.bottom
+
+    Entry {
+      x: Style.space(6)
+      label: "Contacts"
+      icon: "people"
+      selected: root.contactsSelected
+      onActivated: root.contactsRequested()
+    }
 
     Entry {
       x: Style.space(6)

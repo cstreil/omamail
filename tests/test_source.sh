@@ -437,13 +437,16 @@ text = Path("App.qml").read_text()
 header = text[text.index("id: headerRight"):text.index("PanelSeparator {", text.index("id: headerRight"))]
 if "spacing: Style.space(8)" not in header:
     raise SystemExit("test_source.sh: refresh needs breathing room before the header action")
+# The two plain text actions live in the header-actions component; the guard
+# follows them there so a later move cannot quietly turn one into an icon.
+actions = Path("components/HeaderActions.qml").read_text()
 for name in ("create-event-button", "compose-button"):
     marker = 'objectName: "' + name + '"'
-    start = text.index(marker)
-    opening = text.rfind("\n          Button {", 0, start)
-    if opening < 0:
+    start = actions.index(marker)
+    opening = actions.rfind("\n  Button {", 0, start)
+    if opening < 0 or actions.rfind("IconButton {", 0, start) > opening:
         raise SystemExit("test_source.sh: " + name + " must use a normal text button")
-    block = text[opening:text.index("\n          }", start)]
+    block = actions[opening:actions.index("\n  }", start)]
     if "iconName:" in block:
         raise SystemExit("test_source.sh: " + name + " must not carry an icon")
 PY
@@ -462,7 +465,7 @@ app = Path("App.qml").read_text()
 sidebar_use = app[app.index("id: sidebar"):app.index("MailboxTabs {")]
 if "!root.calendarVisible" in sidebar_use or "calendarSelected: root.calendarVisible" not in sidebar_use:
     raise SystemExit("test_source.sh: the mailbox sidebar must remain visible and select Calendar")
-header = app[app.index("id: headerRight"):app.index("// mailbox as a whole")]
+header = app[app.index("id: headerRight"):app.index('objectName: "header-ai-button"')]
 if 'iconName: root.calendarVisible ? "mail" : "calendar"' in header:
     raise SystemExit("test_source.sh: Calendar navigation belongs in the sidebar, not the header")
 

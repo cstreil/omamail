@@ -305,8 +305,10 @@ Item {
   readonly property string page: navPage.kind
   readonly property string overlay: navOverlay ? navOverlay.kind : ""
   readonly property string currentView: page === "reader" ? "reader"
-    : ((page === "calendar" || page === "calendarDetail") ? "calendar" : "list")
+    : ((page === "calendar" || page === "calendarDetail") ? "calendar"
+      : (page === "contacts" ? "contacts" : "list"))
   readonly property bool calendarVisible: currentView === "calendar"
+  readonly property bool contactsVisible: currentView === "contacts"
   readonly property bool showSettings: page === "settings"
   readonly property bool showPicker: page === "picker"
   readonly property bool showSetup: page === "setup"
@@ -344,7 +346,9 @@ Item {
     pendingComposeReturnTo = -1
   }
   function rootKind() {
-    return nav.length > 0 && nav[0].kind === "calendar" ? "calendar" : "list"
+    if (nav.length > 0 && nav[0].kind === "calendar") return "calendar"
+    if (nav.length > 0 && nav[0].kind === "contacts") return "contacts"
+    return "list"
   }
 
   function pushEntry(kind, fields) {
@@ -609,6 +613,19 @@ Item {
   function showCalendar() {
     navUntouched = false
     nav = Nav.replaceRoot(nav, "calendar")
+  }
+
+  function showContacts() {
+    navUntouched = false
+    nav = Nav.replaceRoot(nav, "contacts")
+  }
+
+  // One refresh for whichever view is on screen: the key and the header
+  // button are the same intent, so they share one implementation.
+  function refreshVisibleView() {
+    if (calendarVisible) { calendarView.refresh(); return }
+    if (contactsVisible) { contactsView.refresh(service ? service.activeAccountId : ""); return }
+    if (service) service.refresh()
   }
 
   // Moving the cursor has to bring the row with it. The list is a Column in a
@@ -1087,6 +1104,8 @@ Item {
       return
     }
     if (id === "mailView") return backToList()
+    if (id === "contacts") return contactsVisible ? backToList() : showContacts()
+    if (id === "contactsView") return showContacts()
     if (id === "calendarView") {
       showCalendar()
       calendarView.refresh()
@@ -1097,8 +1116,7 @@ Item {
     if (id === "zoomOut") return zoomBy(-0.1)
     if (id === "zoomReset") { if (service) service.setBodyZoom(1.0); return }
     if (id === "refresh") {
-      if (calendarVisible) calendarView.refresh()
-      else if (service) service.refresh()
+      root.refreshVisibleView()
       return
     }
     if (id === "settings") return openSettings()
@@ -1695,6 +1713,7 @@ Item {
             // Below this it is a slot too small to type in; the shortcut still
             // works and reopens it as the window grows.
             visible: !root.showPage && !root.composing && !root.calendarVisible
+              && !root.contactsVisible
               && parent.width >= Style.space(120)
           textColor: root.foreground
           accentColor: root.accent
@@ -1725,60 +1744,22 @@ Item {
           // Checking for mail and writing one are both things you do to the
           // mailbox as a whole, so they sit together. The menu is the window's
           // own, and it stays on the left with the mark.
-          IconButton {
-            objectName: "refresh-button"
+          HeaderActions {
+            id: headerActions
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing
-            iconName: "refresh"
-            tooltipText: root.calendarVisible
-              ? (root.service && root.service.calendarController.loading
-                ? "Loading calendars" : "Refresh calendars · F5 / Ctrl+R")
-              : (root.service && root.service.listLoading
-                ? "Checking for mail" : "Check mail · F5 / Ctrl+R")
-            foreground: root.dim
-            hoverColor: root.foreground
-            fontFamily: root.fontFamily
-            busy: !!root.service && (root.calendarVisible
-              ? !!(root.service.calendarController && root.service.calendarController.loading)
-              : root.service.listLoading === true)
-            enabled: root.ready && (root.calendarVisible
-              ? !(root.service && root.service.calendarController.loading)
-              : !(root.service && root.service.listLoading))
-            onClicked: {
-              if (root.calendarVisible) calendarView.refresh()
-              else if (root.service) root.service.refresh()
-            }
-          }
-
-          Button {
-            objectName: "create-event-button"
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing && root.calendarVisible
-            text: "Create event"
-            tooltipText: "Create event"
-            foreground: root.dim
-            bordered: true
-            accent: root.accent
-            fontFamily: root.fontFamily
-            fontSize: Style.font.caption
-            enabled: root.ready
-            onClicked: eventComposer.begin()
-          }
-
-          Button {
-            id: headerComposeButton
-            objectName: "compose-button"
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing && !root.calendarVisible
-            text: "Compose"
-            tooltipText: "Compose · c"
-            foreground: root.dim
-            bordered: true
-            accent: root.accent
-            fontFamily: root.fontFamily
-            fontSize: Style.font.caption
-            enabled: root.ready
-            onClicked: root.startCompose("new")
+            service: root.service
+            calendarVisible: root.calendarVisible
+            contactsVisible: root.contactsVisible
+            showPage: root.showPage
+            composing: root.composing
+            ready: root.ready
+            foreground: root.foreground
+            dimColor: root.dim
+            accentColor: root.accent
+            panelFontFamily: root.fontFamily
+            onRefreshRequested: root.refreshVisibleView()
+            onCreateEventRequested: eventComposer.begin()
+            onComposeRequested: root.startCompose("new")
           }
 
           Button {
@@ -1789,8 +1770,8 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             visible: !!root.service && root.service.hasAgent !== false
               && !root.showPage && !root.calendarVisible && root.overlay !== "eventComposer"
-            width: headerComposeButton.implicitHeight
-            height: headerComposeButton.implicitHeight
+            width: headerActions.buttonHeight
+            height: headerActions.buttonHeight
             Accessible.name: "AI"
             tooltipText: "AI... · alt+g"
             ActionIcon {
@@ -1862,6 +1843,7 @@ Item {
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           calendarSelected: root.calendarVisible
+          contactsSelected: root.contactsVisible
           menuLabelPath: labelMenu.opened && !!root.service
             && labelMenu.accountId === root.service.activeAccountId ? labelMenu.labelPath : ""
           service: root.service
@@ -1876,6 +1858,7 @@ Item {
             root.showCalendar()
             calendarView.refresh()
           }
+          onContactsRequested: root.showContacts()
           // Not a search: the provider decides what selecting a label means,
           // and on IMAP it is a folder rather than a term to look for.
           onLabelSelected: function(labelId, name) {
@@ -2232,6 +2215,26 @@ Item {
             onEditRequested: function(sourceId, event) { eventComposer.beginEdit(sourceId, event) }
             onDeleteRequested: function(sourceId, event) { root.requestEventDelete(sourceId, event) }
           }
+        }
+
+        ContactsView {
+          id: contactsView
+          anchors.top: parent.top
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.left: sidebarSplitter.visible ? sidebarSplitter.right
+            : (sidebar.visible ? sidebar.right : parent.left)
+          visible: root.contactsVisible && !root.showPage && !root.composing
+          active: root.contactsVisible
+          z: 10
+          service: root.service
+          textColor: root.foreground
+          backgroundColor: root.background
+          accentColor: root.accent
+          dimColor: root.dim
+          popupBackgroundColor: root.popupBackground
+          popupBorderColor: root.popupBorder
+          panelFontFamily: root.fontFamily
         }
 
         // The one Back for every page the window goes into — settings, the

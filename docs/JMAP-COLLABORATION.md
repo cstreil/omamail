@@ -71,12 +71,25 @@ slices rather than being implied by recipient suggestions.
 
 ### 2. Native address-book UI
 
-1. Add a contact list with source selection, search and stable contact identity.
-2. Add a detail view for names, email addresses, telephone numbers and postal
-   addresses.
-3. Reuse the same normalized model in the composer recipient picker.
-4. Preserve full JSContact data needed for a lossless update even when the UI
-   cannot edit every field.
+Done in the unreleased API-6 revision:
+
+1. `contacts.sources`, `contacts.list` and `contacts.get` expose address books,
+   a bounded searchable page and one full contact.
+2. `ContactsView` shows the readable sources, a debounced search field, the
+   bounded list and a read-only detail pane for names, email addresses,
+   telephone numbers and postal addresses.
+3. The view is a root of the mail shell with `Alt+K` / `Ctrl+Shift+K`, a sidebar
+   entry and the shared refresh action; every answer is bound to the account and
+   request generation that asked for it.
+4. Local harvested addresses stay a composer-only suggestion source; they are
+   not presented as an editable address book.
+
+Still open in this slice:
+
+1. Editing a contact, which needs the mutation revision from slice 3.
+2. Preserving unknown JSContact data across a future lossless update.
+3. Choosing between several readable books is supported, but a remembered
+   preference per account is not.
 
 ### 3. Contact mutations and synchronization
 

@@ -74,6 +74,9 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/calendar/CalendarController.qml ui/calendar/CalendarCache.qml \
 	ui/components/CalendarView.qml \
 	ui/components/WeekCalendarView.qml \
+	ui/components/ContactsView.qml \
+	ui/components/RefreshButton.qml \
+	ui/components/HeaderActions.qml \
 	ui/bar/BarPreview.qml
 APP_QML_FILES := app/qml/Main.qml app/qml/StandaloneShell.qml app/qml/StandaloneManifest.qml
 APP_BUILD_DIR ?= app/build

@@ -405,6 +405,139 @@ Item {
       generation, remote)
   }
 
+  // The address book is a directory of its own: a source list, a bounded page
+  // of rows and one open contact. Every answer is bound to the account and
+  // the request generation that asked for it, so switching mailboxes can never
+  // leave another account's contacts on screen.
+  property var contactSources: []
+  property string contactSource: ""
+  property var contactRows: []
+  property int contactTotal: 0
+  property bool contactsDirectoryBusy: false
+  property var openContact: null
+  property string contactsDirectoryError: ""
+  property string contactsDirectoryAccountId: ""
+  property int contactsDirectoryGeneration: 0
+
+  readonly property bool contactsDirectoryAvailable: backendCanListContacts
+    && activeAccountId !== ""
+
+  function contactErrorText(error) {
+    if (error === "contacts_not_supported") return "This account has no address book."
+    if (error === "contacts_account_unknown") return "This account is no longer configured."
+    if (error === "contacts_no_address_book") return "No readable address book on this account."
+    if (error === "contacts_source_unknown") return "That address book is no longer available."
+    if (error === "contacts_too_many") return "Too many contacts to list. Narrow the search."
+    if (error === "contacts_not_found") return "This contact no longer exists."
+    if (error) return "The address book could not be read."
+    return ""
+  }
+
+  function refreshContactSources(accountId) {
+    var owner = accountId === undefined || accountId === null ? "" : String(accountId)
+    if (!contactsDirectoryAvailable || owner === "") {
+      contactsDirectoryGeneration += 1
+      contactsDirectoryAccountId = ""
+      contactSources = []
+      contactSource = ""
+      contactRows = []
+      contactTotal = 0
+      openContact = null
+      contactsDirectoryError = ""
+      contactsDirectoryBusy = false
+      return
+    }
+    if (contactsDirectoryAccountId !== owner) {
+      contactsDirectoryAccountId = owner
+      contactSources = []
+      contactSource = ""
+      contactRows = []
+      contactTotal = 0
+      openContact = null
+      contactsDirectoryError = ""
+    }
+    var generation = ++contactsDirectoryGeneration
+    contactsDirectoryBusy = true
+    backend.call("contacts.sources", { accountId: owner }, function(result, error) {
+      if (generation !== root.contactsDirectoryGeneration) return
+      contactsDirectoryBusy = false
+      if (error) {
+        contactsDirectoryError = root.contactErrorText(error)
+        contactSources = []
+        contactSource = ""
+        return
+      }
+      var sources = result && Array.isArray(result.sources) ? result.sources : []
+      root.contactSources = sources
+      root.contactsDirectoryError = sources.length === 0
+        ? "This account has no address book." : ""
+      var readable = sources.filter(function(source) {
+        return source && source.id && source.readOnly !== true
+      })
+      var chosen = readable.length > 0 ? readable[0] : (sources.length > 0 ? sources[0] : null)
+      root.contactSource = chosen ? String(chosen.id) : ""
+      if (root.contactSource !== "") root.refreshContactList(owner, "")
+      else { root.contactRows = []; root.contactTotal = 0 }
+    })
+  }
+
+  function refreshContactList(accountId, query) {
+    var owner = accountId === undefined || accountId === null
+      ? contactsDirectoryAccountId : String(accountId)
+    if (!contactsDirectoryAvailable || owner === "" || contactSource === "") return
+    var generation = ++contactsDirectoryGeneration
+    contactsDirectoryBusy = true
+    var params = { accountId: owner, source: contactSource, limit: 200 }
+    if (query !== undefined && query !== null && String(query) !== "") params.query = String(query)
+    backend.call("contacts.list", params, function(result, error) {
+      if (generation !== root.contactsDirectoryGeneration) return
+      contactsDirectoryBusy = false
+      if (error) {
+        contactsDirectoryError = root.contactErrorText(error)
+        contactRows = []
+        contactTotal = 0
+        return
+      }
+      contactsDirectoryError = ""
+      contactRows = result && Array.isArray(result.contacts) ? result.contacts : []
+      contactTotal = result && typeof result.total === "number" ? result.total : contactRows.length
+    })
+  }
+
+  function selectContactSource(sourceId, query) {
+    var next = sourceId === undefined || sourceId === null ? "" : String(sourceId)
+    if (next === contactSource) return
+    contactSource = next
+    openContact = null
+    contactRows = []
+    contactTotal = 0
+    refreshContactList(contactsDirectoryAccountId, query)
+  }
+
+  function openContactDetail(contactId) {
+    var owner = contactsDirectoryAccountId
+    var id = contactId === undefined || contactId === null ? "" : String(contactId)
+    if (owner === "" || id === "") return
+    var generation = ++contactsDirectoryGeneration
+    contactsDirectoryBusy = true
+    backend.call("contacts.get", { accountId: owner, id: id }, function(result, error) {
+      if (generation !== root.contactsDirectoryGeneration) return
+      contactsDirectoryBusy = false
+      if (error) {
+        contactsDirectoryError = root.contactErrorText(error)
+        return
+      }
+      contactsDirectoryError = ""
+      openContact = result && result.contact ? result.contact : null
+    })
+  }
+
+  function closeContactDetail() {
+    contactsDirectoryGeneration += 1
+    contactsDirectoryBusy = false
+    openContact = null
+  }
+
   function registerMailtoHandler() {
     if (!hasMailto || pluginDir === "" || mailtoInstaller.running) return
     mailtoInstaller.command = [pluginDir + "/scripts/register-mailto.sh", pluginDir]
@@ -2596,6 +2729,8 @@ Item {
   onActiveAccountIdChanged: {
     refreshCurrent()
     refreshRecipientContacts(activeAccountId)
+    // An open address book belongs to the account that filled it.
+    if (contactsDirectoryAccountId !== "") refreshContactSources(activeAccountId)
   }
   onAccountListChanged: Qt.callLater(refreshCurrent)
 

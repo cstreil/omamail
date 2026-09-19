@@ -159,10 +159,12 @@ used to exist, and they had.
 | `assistantCommandUp` | `Up` | assistantCommands | Previous AI command |
 | `assistantCommandDown` | `Down` | assistantCommands | Next AI command |
 | `assistantChooseCommand` | `Return`, `Enter` | assistantCommands | Fill the selected AI command |
-| `calendar` | `Alt+C` | mail+calendar | Switch between mail and calendar |
-| `mailView` | `Ctrl+Shift+M` | mail+calendar | Go to mail |
-| `calendarView` | `Ctrl+Shift+C` | mail+calendar | Go to calendar |
-| `toggleSidebar` | `[` | mail+calendar | Show or hide the sidebar |
+| `calendar` | `Alt+C` | mail+calendar+contacts | Switch between mail and calendar |
+| `contacts` | `Alt+K` | mail+calendar+contacts | Switch between mail and contacts |
+| `mailView` | `Ctrl+Shift+M` | mail+calendar+contacts | Go to mail |
+| `calendarView` | `Ctrl+Shift+C` | mail+calendar+contacts | Go to calendar |
+| `contactsView` | `Ctrl+Shift+K` | mail+calendar+contacts | Go to contacts |
+| `toggleSidebar` | `[` | mail+calendar+contacts | Show or hide the sidebar |
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |
 | `zoomReset` | `Ctrl+0` | reader | Reset the zoom |

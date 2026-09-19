@@ -13,10 +13,12 @@
 // follows it — a context that is not text entry parks the focus rather than
 // leaving it wherever the last click put it. Keeping those two as separate
 // things is what let a dismissed compose field go on eating j and k.
-var CONTEXTS = ["list", "reader", "search", "compose", "page", "calendar", "assistant", "assistantCommands"]
+var CONTEXTS = ["list", "reader", "search", "compose", "page", "calendar", "contacts", "assistant", "assistantCommands"]
 
 // Shorthands, so a row says where it lives rather than restating the set.
 var MAIL = ["list", "reader"]
+// The mail chrome is one shell; its views give way to each other with one key.
+var MAIL_OR_VIEW = ["list", "reader", "calendar", "contacts"]
 var ANY = ["*"]
 
 var BINDINGS = [
@@ -190,13 +192,17 @@ var BINDINGS = [
   { id: "assistantChooseCommand", keys: ["Return", "Enter"], contexts: ["assistantCommands"],
     group: "AI", label: "Fill the selected AI command" },
 
-  { id: "calendar", keys: ["Alt+C"], contexts: ["list", "reader", "calendar"],
+  { id: "calendar", keys: ["Alt+C"], contexts: MAIL_OR_VIEW,
     group: "Going", label: "Switch between mail and calendar" },
-  { id: "mailView", keys: ["Ctrl+Shift+M"], contexts: ["list", "reader", "calendar"],
+  { id: "contacts", keys: ["Alt+K"], contexts: MAIL_OR_VIEW,
+    group: "Going", label: "Switch between mail and contacts" },
+  { id: "mailView", keys: ["Ctrl+Shift+M"], contexts: MAIL_OR_VIEW,
     group: "Going", label: "Go to mail" },
-  { id: "calendarView", keys: ["Ctrl+Shift+C"], contexts: ["list", "reader", "calendar"],
+  { id: "calendarView", keys: ["Ctrl+Shift+C"], contexts: MAIL_OR_VIEW,
     group: "Going", label: "Go to calendar" },
-  { id: "toggleSidebar", keys: ["["], contexts: ["list", "reader", "calendar"],
+  { id: "contactsView", keys: ["Ctrl+Shift+K"], contexts: MAIL_OR_VIEW,
+    group: "Going", label: "Go to contacts" },
+  { id: "toggleSidebar", keys: ["["], contexts: MAIL_OR_VIEW,
     group: "Going", label: "Show or hide the sidebar" },
 
   // Only where there is a message body to size. These carried no context at
@@ -233,6 +239,7 @@ function contextFor(state) {
   if (value.composing) return "compose"
   if (value.searchFocused) return "search"
   if (value.calendarVisible) return "calendar"
+  if (value.currentView === "contacts") return "contacts"
   if (value.currentView === "reader") return "reader"
   return "list"
 }
