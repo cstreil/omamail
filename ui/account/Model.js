@@ -586,8 +586,6 @@ function applyLabelChange(summary, action, sourceLabelId, thread) {
   if (!summary) return summary
   var change = labelChangesFor(action, sourceLabelId)
   if (!change) return summary
-  var next = {}
-  for (var key in summary) next[key] = summary[key]
   var labels = Array.isArray(summary.labelIds) ? summary.labelIds.slice() : []
   for (var i = 0; i < change.remove.length; i++) {
     var at = labels.indexOf(change.remove[i])
@@ -596,18 +594,25 @@ function applyLabelChange(summary, action, sourceLabelId, thread) {
   for (var j = 0; j < change.add.length; j++) {
     if (labels.indexOf(change.add[j]) < 0) labels.push(change.add[j])
   }
+  return rowWithThread(withLabels(summary, labels), thread)
+}
+
+// The summary carrying these labels, and every flag that mirrors one of them
+// — rather than the three that used to be the only ones read. `spam` moves a
+// row between two of these, and a menu asking a stale `inSpam` offers "Move
+// to Inbox" on a message just reported as spam — which would add INBOX and
+// keep SPAM. Unread and starred are the conversation's as well as the
+// labels', which is `rowWithThread`'s rule, so they are left to the caller.
+function withLabels(summary, labels) {
+  var next = {}
+  for (var key in summary) next[key] = summary[key]
   next.labelIds = labels
   next.inInbox = labels.indexOf("INBOX") >= 0
-  // Every flag that mirrors a label, rather than the three that used to be the
-  // only ones read. `spam` moves a row between two of these, and a menu asking
-  // a stale `inSpam` offers "Move to Inbox" on a message just reported as
-  // spam — which would add INBOX and keep SPAM. Unread and starred are the
-  // conversation's as well as the labels', which is `rowWithThread`'s rule.
   next.inTrash = labels.indexOf("TRASH") >= 0
   next.inSpam = labels.indexOf("SPAM") >= 0
   next.isSent = labels.indexOf("SENT") >= 0
   next.isDraft = labels.indexOf("DRAFT") >= 0
-  return rowWithThread(next, thread)
+  return next
 }
 
 // Skeleton rows replace only an empty list's first fetch. Loading another page
@@ -1058,6 +1063,28 @@ function detailSummary(previous, summary) {
       && previous.thread && previous.thread.count > 0)
     merged.thread = previous.thread
   return merged
+}
+
+// A detail read answered from disk, against what the account holds about the
+// same message. The file is a live read as the server answered it once, and
+// everything since — the quiet mark-read on opening, a star, a move — went
+// through the store and never touched the file. So a cached copy has nothing
+// to say about labels that the account does not know better. Painted as it
+// came, a member read a moment ago went unread again in the rail for one
+// round trip, and the reader marked it read a second time. The labels in
+// hand replace the file's, and so does the block when the account holds one
+// — a representative's block is recomputed from its members as they are
+// marked, and the file's is from before — with the flags following
+// `rowWithThread`'s rule, the conversation's as well as the labels', which is
+// what a live read of the same message carries.
+//
+// Only when there is something in hand. A message opened from a notification
+// has no row and no member summary yet, and the file is then the only account
+// of it there is.
+function cachedDetailSummary(known, summary) {
+  if (!summary || !known || known.id !== summary.id || !Array.isArray(known.labelIds)) return summary
+  var block = known.thread && known.thread.count > 0 ? known.thread : null
+  return rowWithThread(withLabels(summary, known.labelIds.slice()), block)
 }
 
 function indexById(list, id) {

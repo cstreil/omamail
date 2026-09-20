@@ -956,6 +956,57 @@ assert.strictEqual(model.detailSummary(grouped, {
     memberIds: ["maaaaae", "maaaaaf"] }
 }).thread.count, 2)
 
+// A detail read answered from disk is older than what the account holds: the
+// file is the live read that first opened the message, and the quiet mark-read
+// that followed changed the store, not the file. The labels in hand win, and
+// the flags that mirror them follow.
+{
+  const fromDisk = {
+    id: "reply", subject: "Re: Lunch on Friday", snippet: "Yes",
+    unread: true, starred: false, inInbox: true, inTrash: false,
+    labelIds: ["INBOX", "UNREAD"],
+    thread: { id: "d", count: 0, unread: false, flagged: false, memberIds: [] }
+  }
+  const inHand = { id: "reply", unread: false, starred: true, labelIds: ["INBOX", "STARRED"] }
+  const painted = model.cachedDetailSummary(inHand, fromDisk)
+  deepEqual(painted.labelIds, ["INBOX", "STARRED"])
+  assert.strictEqual(painted.unread, false, "read a moment ago stays read")
+  assert.strictEqual(painted.starred, true)
+  assert.strictEqual(painted.inInbox, true)
+  assert.strictEqual(painted.subject, "Re: Lunch on Friday", "everything else is the file's")
+  assert.strictEqual(painted.snippet, "Yes")
+  assert.strictEqual(painted.thread.count, 0, "a member has no block in hand, so the file's stands")
+  deepEqual(fromDisk.labelIds, ["INBOX", "UNREAD"], "the file's summary is not written on")
+  // A representative's file carries the block as it was when the file was
+  // written; the row's block has been recomputed since from its members. The
+  // row's wins, and the flags are the conversation's as well as the labels',
+  // as `rowWithThread` has them — so a thread whose reply is still unread
+  // still reads unread from the representative's copy, as its live read does.
+  const filed = {
+    id: "rep", labelIds: ["INBOX", "UNREAD"], unread: true, starred: false,
+    thread: { id: "d", count: 2, unread: true, flagged: false, memberIds: ["rep", "reply"] }
+  }
+  const settled = { id: "rep", unread: false, starred: false, labelIds: ["INBOX"],
+    thread: { id: "d", count: 2, unread: false, flagged: false, memberIds: ["rep", "reply"] } }
+  const rep = model.cachedDetailSummary(settled, filed)
+  assert.strictEqual(rep.unread, false)
+  assert.strictEqual(rep.thread.unread, false, "the row's block replaced the file's")
+  const replyStillUnread = { ...settled, thread: { ...settled.thread, unread: true } }
+  assert.strictEqual(model.cachedDetailSummary(replyStillUnread, filed).unread, true)
+  // A count of 0 in hand is no block at all, so the file's stays.
+  assert.strictEqual(model.cachedDetailSummary({ ...settled, thread: { id: "d", count: 0, memberIds: [] } }, filed).thread.count, 2)
+  // A message moved since the file was written follows the move.
+  const moved = model.cachedDetailSummary({ id: "reply", labelIds: ["TRASH"] }, fromDisk)
+  assert.strictEqual(moved.inInbox, false)
+  assert.strictEqual(moved.inTrash, true)
+  // Nothing in hand — a message opened from a notification — leaves the file
+  // as the only account of the message there is; so does another message's.
+  assert.strictEqual(model.cachedDetailSummary(null, fromDisk), fromDisk)
+  assert.strictEqual(model.cachedDetailSummary({ id: "reply" }, fromDisk), fromDisk)
+  assert.strictEqual(model.cachedDetailSummary({ id: "other", labelIds: [] }, fromDisk), fromDisk)
+  assert.strictEqual(model.cachedDetailSummary(inHand, null), null)
+}
+
 // ------------------------------------------------------ a CLI-shaped sign-in
 //
 // A provider whose sign-in is a program of its own says which program: the

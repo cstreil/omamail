@@ -1319,6 +1319,11 @@ Item {
         if (!root.detailPainted) root.fail("Could not prepare message detail")
         return
       }
+      // A copy from disk is a live read as the server answered it once, and
+      // nothing since — the quiet mark-read on opening, a star — reached the
+      // file. What the account holds about the message is newer and stays:
+      // the file paints the body early, not the labels or the block.
+      if (cached) summary = Model.cachedDetailSummary(root.summaryOf(messageId), summary)
       function paintSummary(summary) {
       if (serial !== root.detailSerial || (cached && root.detailLive)) return
       summary = root.hydrateSummary(summary)
