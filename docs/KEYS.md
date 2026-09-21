@@ -31,6 +31,7 @@ readonly property string keyContext:
   : root.composing ? "compose"
   : searchBar.fieldFocused ? "search"
   : root.calendarVisible ? "calendar"
+  : root.currentView === "contacts" ? "contacts"
   : root.currentView === "reader" ? "reader"
   : "list"
 ```
@@ -45,6 +46,7 @@ readonly property string keyContext:
 | `assistantCommands` | Choosing an AI slash command | `Up`, `Down`, `Return`, `Enter`, `Escape`, and the modified keys |
 | `page` | Setup or settings | `Escape`, and the modified keys |
 | `calendar` | The calendar month | Calendar navigation and the modified keys |
+| `contacts` | The address book | Contact selection, opening and `/` to search |
 
 `Ctrl+,` opens Settings from every context, including a focused draft field.
 Back returns to the previous screen with the draft intact.
@@ -148,6 +150,10 @@ used to exist, and they had.
 | `calendarToday` | `t` | calendar | Go to today |
 | `calendarWeek` | `w` | calendar | Show week view |
 | `calendarMonth` | `m` | calendar | Show month view |
+| `contactNext` | `j`, `Down` | contacts | Select the next contact |
+| `contactPrevious` | `k`, `Up` | contacts | Select the previous contact |
+| `openContact` | `Return`, `Enter`, `o` | contacts | Open the selected contact |
+| `searchContacts` | `/` | contacts | Search contacts |
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
 | `undoSend` | `Alt+Z` | all | Undo send |
 | `search` | `/` | mail | Search |

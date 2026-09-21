@@ -361,7 +361,7 @@ Item {
   // one click in the field the context stayed "search" with a message open,
   // and `e` typed itself into the query instead of archiving. The field is
   // left the way it is submitted: by a navigation, not only by Escape.
-  onNavChanged: if (searchBar.fieldFocused) focusScope.parkKeyboard()
+  onNavChanged: if (searchBar.fieldFocused || contactsView.searchFocused) focusScope.parkKeyboard()
 
   // An overlay whose view has closed, wherever it sits. Usually the top; a
   // draft can also finish under the shortcut sheet, and then the sheet goes
@@ -1028,6 +1028,7 @@ Item {
       if (id === "scrollDown") return shortcutHelp.scrollBy(1)
       if (id === "scrollUp") return shortcutHelp.scrollBy(-1)
     }
+    if (contactsVisible && contactsView.runShortcut(id)) return true
     if (id === "cursorDown") return moveCursor(1)
     if (id === "cursorUp") return moveCursor(-1)
     if (id === "scrollDown") return reader.scrollBy(1)
@@ -1128,6 +1129,7 @@ Item {
   // purpose: a QQC.Popup with CloseOnEscape consumes the key itself, so a
   // branch for them here would never run. Everything else is the history.
   function goBack() {
+    if (contactsVisible && contactsView.goBack()) { focusScope.parkKeyboard(); return }
     if (activeAssistant && activeAssistant.commandsOpen) { activeAssistant.dismissCommands(); return }
     if (activeAssistant && activeAssistant.historyMode) { activeAssistant.historyMode = false; activeAssistant.takeFocus(); return }
     if (activeAssistant && activeAssistant.interrupt()) return
@@ -1549,20 +1551,13 @@ Item {
         assistantCommands: !!root.activeAssistant && root.activeAssistant.commandsOpen,
         showPage: root.showPage,
         composing: root.composing,
-        searchFocused: searchBar.fieldFocused,
+        searchFocused: root.contactsVisible ? contactsView.searchFocused : searchBar.fieldFocused,
         calendarVisible: root.calendarVisible,
         currentView: root.currentView,
         sendPending: !!root.service && root.service.sendPending
       }))
 
-      // The context owns the keyboard. Changing it moves the focus to whatever
-      // that context types into, or parks it when the context types into
-      // nothing — so a field that has been dismissed cannot go on eating keys.
-      //
-      // Keeping these as two things is the bug this replaces: the context came
-      // from the screen while the focus stayed wherever the last click left it,
-      // and a closed compose field kept swallowing j and k. One mechanism now,
-      // and there is nothing to keep in step.
+      // Move focus to this context's input, or park it for app shortcuts.
       onKeyContextChanged: Qt.callLater(applyContextFocus)
       function focusWithin(container) {
         var item = focusScope.Window.activeFocusItem
@@ -1580,13 +1575,13 @@ Item {
           if (eventComposer.opened) eventComposer.takeFocus()
           else compose.takeFocus()
         }
-        else if (keyContext === "search") searchBar.focusField()
+        else if (keyContext === "search") {
+          if (root.contactsVisible) contactsView.focusSearch()
+          else searchBar.focusField()
+        }
         else parkKeyboard()
       }
 
-      // forceActiveFocus on the scope itself is a no-op: it re-elects the
-      // scope's current focus item, which is the very field being left. It has
-      // to land on a plain Item for the field to actually let go.
       function parkKeyboard() {
         keyboardHome.forceActiveFocus()
       }
@@ -1948,7 +1943,7 @@ Item {
                   root.listWidth > 0 ? root.listWidth
                     : Math.min(Style.space(460), Math.round(parent.width * 0.34))))
           visible: width > 0 && !root.showPage && !root.composing
-            && !root.calendarVisible
+            && !root.calendarVisible && !root.contactsVisible
 
           // The scroller fills the column so its bar sits on the column edge;
           // the breathing room is padding on the content, not a margin on the
@@ -2050,7 +2045,7 @@ Item {
           anchors.top: parent.top
           anchors.bottom: parent.bottom
           visible: !root.showPage && !root.composing && !root.calendarVisible
-            && (!root.compact || root.currentView === "reader")
+            && !root.contactsVisible && (!root.compact || root.currentView === "reader")
           service: root.service
           textColor: root.foreground
           backgroundColor: root.background
@@ -2200,9 +2195,6 @@ Item {
             calendarTodayBackgroundColor: root.calendarTodayBackground
             calendarBorderWidth: root.calendarBorderWidth
             panelFontFamily: root.fontFamily
-            // An event opened for reading is a place, so Back closes it before
-            // it leaves the calendar. The view owns the open state; the stack
-            // follows it.
             onDetailOpenChanged: {
               if (detailOpen) { if (root.page !== "calendarDetail") root.pushEntry("calendarDetail", {}) }
               else if (root.page === "calendarDetail") { root.navUntouched = false; root.nav = Nav.pop(root.nav) }

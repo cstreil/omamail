@@ -143,7 +143,7 @@ Item {
     }
 
     function test_escape_is_the_way_out_of_every_context() {
-      var contexts = ["list", "reader", "search", "compose", "page", "calendar"]
+      var contexts = ["list", "reader", "search", "compose", "page", "calendar", "contacts"]
       for (var i = 0; i < contexts.length; i++) {
         host.context = contexts[i]
         host.lastId = ""
@@ -245,6 +245,26 @@ Item {
       wait(20)
       keyClick(Qt.Key_M, Qt.ControlModifier | Qt.ShiftModifier)
       compare(host.lastId, "mailView")
+    }
+
+    function test_contacts_use_window_shortcuts_from_parked_focus() {
+      host.context = "contacts"
+      scope.applyContextFocus()
+      wait(20)
+      keyClick(Qt.Key_J)
+      compare(host.lastId, "contactNext")
+      host.lastId = ""
+      keyClick(Qt.Key_Up)
+      compare(host.lastId, "contactPrevious")
+      host.lastId = ""
+      keyClick(Qt.Key_Return)
+      compare(host.lastId, "openContact")
+      host.lastId = ""
+      keyClick(Qt.Key_Slash)
+      compare(host.lastId, "searchContacts")
+      host.lastId = ""
+      keyClick(Qt.Key_E)
+      compare(host.lastId, "", "mail actions stay dead in contacts")
     }
 
     // Bare `w` is week view. The platform close chord is Ctrl+W / Cmd+W, and

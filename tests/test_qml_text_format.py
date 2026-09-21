@@ -80,6 +80,17 @@ def main():
                 excerpt = " ".join(binding.group(1).split())[:60]
                 failures.append("%s: %s { text: %s } needs textFormat: Text.PlainText"
                                 % (path.relative_to(ROOT), name, excerpt))
+
+    # Shared controls are also trust boundaries: a view can forward a server
+    # label into Button.text after this scanner has lost the original expression.
+    # Keep the standalone Button's final renderer plain, whatever its caller is.
+    button_path = ROOT.parent / "app" / "qml" / "imports" / "qs" / "Ui" / "Button.qml"
+    button_source = button_path.read_text(encoding="utf-8")
+    forwarded = [body for _name, body in blocks(button_source)
+                 if re.search(r"^\s*text\s*:\s*root\.text\s*$", body, re.M)]
+    if len(forwarded) != 1 or "textFormat: Text.PlainText" not in forwarded[0]:
+        failures.append("app/qml/imports/qs/Ui/Button.qml: forwarded Button.text needs "
+                        "textFormat: Text.PlainText")
     if failures:
         for line in failures:
             print("test_qml_text_format.py: " + line, file=sys.stderr)

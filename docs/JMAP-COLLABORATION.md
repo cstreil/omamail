@@ -117,7 +117,8 @@ The same unreleased revision carries the read-only address-book surface the
 contact view needs:
 
 - `contacts.suggest`: optional `{"accountId"}`; local plus remote suggestions
-- `contacts.sources`: `{"accountId"}` -> `{sources:[{id,name,default,subscribed,readOnly}]}`
+- `contacts.sources`: `{"accountId"}` -> `{sources:[{id,name,default,subscribed,readOnly}]}`;
+  unreadable books are omitted, while `readOnly` means readable but not writable
 - `contacts.list`: `{"accountId","source","query"?,"limit"?,"position"?}` ->
   `{contacts:[{id,name,emails,source}],total,position}`; 50 rows by default,
   200 at most, and ordering comes from the backend because the server supports
@@ -167,6 +168,8 @@ the user explicitly creates a server contact.
   sole trusted destinations established by session discovery.
 - Account and capability checks complete before any contacts or calendar call.
 - Every request has an overall deadline, bounded body and bounded object count.
+  Server-capped `ContactCard/query` pages are followed only while position, total
+  and query state remain stable; all retained cards share one 32-MiB JSON budget.
 - JSON values, ids, state tokens, names and contact fields are untrusted input.
 - Malformed input and capability refusal cause no mutation or cache replacement.
 - Errors returned to QML are stable codes and never include server bodies,

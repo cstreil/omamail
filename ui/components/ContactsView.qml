@@ -8,6 +8,7 @@ import qs.Ui
 // request generation, so nothing here has to know which provider answered.
 Item {
   id: root
+  objectName: "contacts-view"
 
   required property var service
   required property color textColor
@@ -24,11 +25,14 @@ Item {
     ? root.service.contactRows : []
   readonly property var contact: root.service ? root.service.openContact : null
   readonly property string errorText: root.service ? String(root.service.contactsDirectoryError || "") : ""
+  readonly property string detailError: root.service
+    ? String(root.service.contactsDirectoryDetailError || "") : ""
   readonly property bool busy: root.service ? root.service.contactsDirectoryBusy === true : false
   readonly property bool sourceSelected: root.service
     ? String(root.service.contactSource || "") !== "" : false
   readonly property bool narrow: width < Style.space(620)
   readonly property bool listVisible: !narrow || !root.contact
+  readonly property bool searchFocused: searchField.activeFocus
 
   property string query: ""
   property string selectedId: ""
@@ -45,7 +49,33 @@ Item {
   }
 
   function refresh(accountId) {
-    if (root.service) root.service.refreshContactSources(accountId)
+    if (root.service) root.service.refreshContactSources(accountId, root.query)
+  }
+
+  function focusSearch() { searchField.forceActiveFocus() }
+
+  function activateSelection() {
+    if (root.selectedId !== "") root.activate(root.selectedId)
+  }
+
+  function runShortcut(id) {
+    if (id === "contactNext") { root.moveSelection(1); return true }
+    if (id === "contactPrevious") { root.moveSelection(-1); return true }
+    if (id === "openContact") { root.activateSelection(); return true }
+    if (id === "searchContacts") { root.focusSearch(); return true }
+    return false
+  }
+
+  function goBack() {
+    if (root.contact !== null) { root.closeDetail(); return true }
+    if (searchField.text !== "") {
+      searchField.text = ""
+      searchDebounce.stop()
+      root.query = ""
+      root.submitQuery()
+      return true
+    }
+    return false
   }
 
   function submitQuery() {
@@ -127,8 +157,8 @@ Item {
         }
       }
 
-      // One button per readable address book; the writable ones come first so
-      // the default book is what a fresh view shows.
+      // One button per readable address book. Service preserves an existing
+      // choice, then falls back to the server's readable default.
       Flow {
         id: sourceRow
         objectName: "contact-sources"
@@ -172,12 +202,14 @@ Item {
 
       Text {
         objectName: "contact-message"
-        visible: root.errorText !== "" || (root.selectedId === "" && root.rows.length === 0)
+        visible: root.errorText !== "" || root.detailError !== ""
+          || (root.selectedId === "" && root.rows.length === 0)
         width: parent.width
         wrapMode: Text.WordWrap
         textFormat: Text.PlainText
         text: root.errorText !== "" ? root.errorText
-          : (root.sourceSelected ? "No contacts found." : "No address book on this account.")
+          : (root.detailError !== "" ? root.detailError
+          : (root.sourceSelected ? "No contacts found." : "No address book on this account."))
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
@@ -385,42 +417,6 @@ Item {
         fontSize: Style.font.caption
         foreground: root.dimColor
         onClicked: root.closeDetail()
-      }
-    }
-  }
-
-  FocusScope {
-    id: keyScope
-    anchors.fill: parent
-    focus: true
-
-    Keys.onPressed: function(event) {
-      if (event.key === Qt.Key_Down || event.text === "j") {
-        root.moveSelection(1)
-        event.accepted = true
-        return
-      }
-      if (event.key === Qt.Key_Up || event.text === "k") {
-        root.moveSelection(-1)
-        event.accepted = true
-        return
-      }
-      if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.text === "o") {
-        if (root.selectedId !== "") root.activate(root.selectedId)
-        event.accepted = true
-        return
-      }
-      if (event.key === Qt.Key_Escape) {
-        if (root.contact !== null) root.closeDetail()
-        else if (searchField.text !== "") { searchField.text = ""; root.query = ""; root.submitQuery() }
-        event.accepted = true
-        return
-      }
-      // Typing anywhere in the view belongs to the search field.
-      if (event.text.length === 1 && event.text.charCodeAt(0) >= 32) {
-        searchField.forceActiveFocus()
-        searchField.insertAt(searchField.cursorPosition, event.text)
-        event.accepted = true
       }
     }
   }

@@ -104,6 +104,20 @@ Item {
     property var selectedInvite: null
     property var selectedResponse: ""
     property var recipientContacts: []
+    property var contactSources: [
+      ({ id: "book", name: "Address Book", default: true, subscribed: true, readOnly: false })
+    ]
+    property string contactSource: "book"
+    property var contactRows: [
+      ({ id: "one", name: "Alice", emails: ["alice@example.test"], source: "book" }),
+      ({ id: "two", name: "Bob", emails: ["bob@example.test"], source: "book" })
+    ]
+    property int contactTotal: 2
+    property bool contactsDirectoryBusy: false
+    property var openContact: null
+    property string contactsDirectoryError: ""
+    property string contactsDirectoryDetailError: ""
+    property string contactsDirectoryAccountId: activeAccountId
     property var sendAsAliases: []
     property var sendIdentities: []
     property var calendarController: null
@@ -153,6 +167,22 @@ Item {
     }
     function preferredSendAs(_recipients) { return null }
     function refreshRecipientContacts() {}
+    function refreshContactSources(accountId, query) {
+      contactsDirectoryAccountId = String(accountId || "")
+      record("contactSources:" + String(query || ""))
+    }
+    function refreshContactList(accountId, query) {
+      contactsDirectoryAccountId = String(accountId || "")
+      record("contactList:" + String(query || ""))
+    }
+    function selectContactSource(sourceId, query) {
+      contactSource = String(sourceId || "")
+      refreshContactList(activeAccountId, query)
+    }
+    function openContactDetail(contactId) {
+      openContact = ({ id: String(contactId || ""), name: "Opened", emails: [], phones: [], addresses: [] })
+    }
+    function closeContactDetail() { openContact = null }
     function cursorOffset(_id, _delta) { return "" }
     function clearSelection() {
       selectedId = ""
@@ -268,6 +298,15 @@ Item {
       mailService.selectedId = ""
       mailService.selectedMessage = null
       mailService.unavailableActions = []
+      mailService.contactSource = "book"
+      mailService.contactRows = [
+        ({ id: "one", name: "Alice", emails: ["alice@example.test"], source: "book" }),
+        ({ id: "two", name: "Bob", emails: ["bob@example.test"], source: "book" })
+      ]
+      mailService.contactTotal = 2
+      mailService.openContact = null
+      mailService.contactsDirectoryError = ""
+      mailService.contactsDirectoryDetailError = ""
       mailService.selectedBody = ({ text: "Original body", source: "plain" })
       fakeAuth.credentialsPresent = false
       fakeShell.hidden = []
@@ -279,6 +318,41 @@ Item {
       app.resetNavigation()
       waitForRendering(app)
       compare(kinds(), "list", "every test starts on the list")
+    }
+
+    function test_contacts_route_uses_the_app_key_router() {
+      keyClick(Qt.Key_K, Qt.ControlModifier | Qt.ShiftModifier)
+      tryCompare(app, "currentView", "contacts")
+      compare(kinds(), "contacts")
+      var scope = having(app, function(item) { return item.keyContext !== undefined })
+      var contacts = named(app, "contacts-view")
+      verify(scope && contacts)
+      tryCompare(scope, "keyContext", "contacts")
+      scope.applyContextFocus()
+
+      keyClick(Qt.Key_J)
+      compare(contacts.selectedId, "one", "j reaches contacts from the parked app focus")
+      keyClick(Qt.Key_Down)
+      compare(contacts.selectedId, "two")
+      keyClick(Qt.Key_Return)
+      verify(mailService.openContact !== null)
+      keyClick(Qt.Key_Escape)
+      compare(mailService.openContact, null, "Escape closes the contact before leaving the root")
+      compare(app.currentView, "contacts")
+
+      keyClick(Qt.Key_Slash)
+      var field = named(app, "contact-search")
+      tryCompare(field, "activeFocus", true)
+      keyClick(Qt.Key_B)
+      keyClick(Qt.Key_O)
+      keyClick(Qt.Key_B)
+      compare(field.text, "bob")
+      keyClick(Qt.Key_Escape)
+      compare(field.text, "", "Escape clears the visible contact filter")
+      compare(app.currentView, "contacts")
+      tryCompare(scope, "keyContext", "contacts")
+      compare(named(app, "messageBodyScroller").visible, false,
+        "the mail reader is not an active surface below contacts")
     }
 
     function test_control_comma_opens_settings_data() {

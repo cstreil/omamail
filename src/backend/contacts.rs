@@ -35,18 +35,24 @@ async fn suggest(session: &Session, fields: &Map<String, Value>) -> Result<Value
     if provider != "jmap" {
         return Ok(local);
     }
-    let remote = session.jmap.contact_suggestions(account).await?;
-    crate::contacts::merge(&local, &remote)
+    match session.jmap.contact_suggestions(account).await {
+        Ok(remote) => crate::contacts::merge(&local, &remote),
+        Err("contacts_not_supported") => Ok(local),
+        Err(error) => Err(error),
+    }
 }
 
 async fn sources(session: &Session, fields: &Map<String, Value>) -> Result<Value, &'static str> {
     allow(fields, &["accountId"])?;
     let account = account_id(fields)?;
-    let (provider, _) = account_and_local(account).await?;
+    let provider = account_provider(account).await?;
     if provider != "jmap" {
         return Ok(json!({"sources": []}));
     }
-    session.jmap.contact_sources(account).await
+    match session.jmap.contact_sources(account).await {
+        Err("contacts_not_supported") => Ok(json!({"sources": []})),
+        result => result,
+    }
 }
 
 async fn list(session: &Session, fields: &Map<String, Value>) -> Result<Value, &'static str> {
@@ -61,14 +67,18 @@ async fn list(session: &Session, fields: &Map<String, Value>) -> Result<Value, &
     let query = text(fields, "query", MAX_QUERY)?.unwrap_or("");
     let limit = number(fields, "limit", DEFAULT_LIMIT, MAX_LIMIT)?;
     let position = number(fields, "position", 0, usize::MAX)?;
-    let (provider, _) = account_and_local(account).await?;
+    let provider = account_provider(account).await?;
     if provider != "jmap" {
         return Ok(json!({"contacts": [], "total": 0, "position": 0}));
     }
-    session
+    match session
         .jmap
         .contact_list(account, source, query, limit, position)
         .await
+    {
+        Err("contacts_not_supported") => Ok(json!({"contacts": [], "total": 0, "position": 0})),
+        result => result,
+    }
 }
 
 async fn detail(session: &Session, fields: &Map<String, Value>) -> Result<Value, &'static str> {
@@ -77,28 +87,43 @@ async fn detail(session: &Session, fields: &Map<String, Value>) -> Result<Value,
     let id = text(fields, "id", MAX_SOURCE)?
         .filter(|value| !value.is_empty())
         .ok_or("invalid_params")?;
-    let (provider, _) = account_and_local(account).await?;
+    let provider = account_provider(account).await?;
     if provider != "jmap" {
         return Err("contacts_not_supported");
     }
     session.jmap.contact_detail(account, id).await
 }
 
-// The account registry and the local harvest are both blocking file work, so
-// they share one worker and never stall an async worker.
+// Account lookup and local harvesting are blocking file work. Remote-only
+// directory calls must not walk local mail databases merely to learn a provider.
+async fn account_provider(account: &str) -> Result<String, &'static str> {
+    let lookup = account.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let accounts = crate::account::list_readonly()?;
+        Ok::<_, &'static str>(provider_from_accounts(&accounts, &lookup)?.to_owned())
+    })
+    .await
+    .map_err(|_| "worker_failed")?
+}
+
 async fn account_and_local(account: &str) -> Result<(String, Value), &'static str> {
     let lookup = account.to_owned();
     tokio::task::spawn_blocking(move || {
         let accounts = crate::account::list_readonly()?;
-        let entry = accounts["accounts"]
-            .as_array()
-            .and_then(|entries| entries.iter().find(|entry| entry["id"] == lookup))
-            .ok_or("contacts_account_unknown")?;
-        let provider = entry["provider"].as_str().ok_or("accounts_invalid")?;
-        Ok::<_, &'static str>((provider.to_owned(), crate::contacts::suggest()?))
+        let provider = provider_from_accounts(&accounts, &lookup)?.to_owned();
+        Ok::<_, &'static str>((provider, crate::contacts::suggest()?))
     })
     .await
     .map_err(|_| "worker_failed")?
+}
+
+fn provider_from_accounts<'a>(accounts: &'a Value, account: &str) -> Result<&'a str, &'static str> {
+    accounts["accounts"]
+        .as_array()
+        .and_then(|entries| entries.iter().find(|entry| entry["id"] == account))
+        .ok_or("contacts_account_unknown")?["provider"]
+        .as_str()
+        .ok_or("accounts_invalid")
 }
 
 fn allow(fields: &Map<String, Value>, allowed: &[&str]) -> Result<(), &'static str> {
@@ -152,6 +177,26 @@ mod tests {
 
     fn params(value: Value) -> Map<String, Value> {
         value.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn provider_lookup_does_not_need_a_local_contact_harvest() {
+        let accounts = json!({"accounts":[
+            {"id":"jmap:one@example.test","provider":"jmap"},
+            {"id":"imap:two@example.test","provider":"imap"}
+        ]});
+        assert_eq!(
+            provider_from_accounts(&accounts, "jmap:one@example.test"),
+            Ok("jmap")
+        );
+        assert_eq!(
+            provider_from_accounts(&accounts, "missing"),
+            Err("contacts_account_unknown")
+        );
+        assert_eq!(
+            provider_from_accounts(&json!({"accounts":[{"id":"broken"}]}), "broken"),
+            Err("accounts_invalid")
+        );
     }
 
     #[test]

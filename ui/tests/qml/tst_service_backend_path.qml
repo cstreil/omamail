@@ -31,6 +31,7 @@ Item {
       compare(service.backendCanCheckMicrosoftConnection, true)
       compare(service.backendCanDiscoverCalendars, true)
       compare(service.backendCanSuggestRemoteContacts, false)
+      compare(service.backendCanListContacts, false)
       backend.latestApiVersion = 6
       compare(service.backendCanCheckMicrosoftConnection, true,
         "a later API must not disable an already supported connection check")
@@ -38,10 +39,12 @@ Item {
       compare(service.backendCanCheckMicrosoftConnection, true)
       compare(service.backendCanDiscoverCalendars, true)
       compare(service.backendCanSuggestRemoteContacts, true)
+      compare(service.backendCanListContacts, true)
       backend.connected = false
       compare(service.backendCanCheckMicrosoftConnection, false)
       compare(service.backendCanDiscoverCalendars, false)
       compare(service.backendCanSuggestRemoteContacts, false)
+      compare(service.backendCanListContacts, false)
     }
     function test_calendar_requests_obey_the_connected_api() {
       var service = createTemporaryObject(factory, parent)

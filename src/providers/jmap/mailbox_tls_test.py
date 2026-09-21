@@ -129,7 +129,19 @@ with contextlib.nullcontext(pathlib.Path(__file__).parent.parent / "testdata" / 
                     if text and not any(needle in text for needle in ("alice","bob")):
                         result={"ids":[],"position":0,"total":0,"queryState":"query-1"}
                     else:
-                        result={"ids":["contact-1","contact-2"],"position":0,"total":2,"queryState":"query-1","canCalculateChanges":True}
+                        all_ids=["contact-1","contact-2"]
+                        position=int(args.get("position",0))
+                        requested=max(0,int(args.get("limit",len(all_ids))))
+                        # A conforming server may cap a requested page. Returning
+                        # one id at a time makes every client prove it follows
+                        # ContactCard/query until the reported total is complete.
+                        page=all_ids[position:position+min(requested,1)]
+                        if scenario=="contact-query-stall" and position>0: page=[]
+                        if scenario=="contact-query-duplicate" and position>0: page=["contact-1"]
+                        reported_position=position+1 if scenario=="contact-query-wrong-position" else position
+                        reported_total=1001 if scenario=="contact-query-too-many" else len(all_ids)
+                        query_state="query-2" if scenario=="contact-query-state-change" and position>0 else "query-1"
+                        result={"ids":page,"position":reported_position,"total":reported_total,"queryState":query_state,"canCalculateChanges":True}
                 elif method=="ContactCard/get":
                     if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"] or args.get("accountId")!="contacts-account": replies.append(["error",{"type":"invalidArguments"},id]);continue
                     cards={

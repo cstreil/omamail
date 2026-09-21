@@ -11,7 +11,7 @@ function frozen(stack) {
 
 // ------------------------------------------------------------------- shape
 
-deepEqual(nav.ROOTS, ["list", "calendar"])
+deepEqual(nav.ROOTS, ["list", "calendar", "contacts"])
 deepEqual(nav.OVERLAYS, ["compose", "eventComposer", "help"])
 
 deepEqual(nav.entry("reader", { id: "m1" }), { id: "m1", kind: "reader" })
@@ -135,8 +135,10 @@ deepEqual(nav.kinds(nav.pop([nav.entry("list"), nav.entry("reader", { id: "m1" }
 // Back on the root is what closes the window, and the caller tells by
 // identity rather than by content.
 const calendar = [nav.entry("calendar")]
+const contacts = [nav.entry("contacts")]
 assert.strictEqual(nav.pop(list), list)
 assert.strictEqual(nav.pop(calendar), calendar)
+assert.strictEqual(nav.pop(contacts), contacts)
 const picker = [nav.entry("picker")]
 assert.strictEqual(nav.pop(picker), picker, "a first-run picker is a root too")
 assert.notStrictEqual(nav.pop(reader1), reader1)
@@ -170,6 +172,8 @@ deepEqual(nav.page([nav.entry("help")]), { kind: "list" })
 // ------------------------------------------------------ roots and resets
 
 deepEqual(nav.replaceRoot(reader1, "calendar"), [{ kind: "calendar" }])
+deepEqual(nav.replaceRoot(reader1, "contacts"), [{ kind: "contacts" }],
+  "contacts is a real root rather than an unknown kind that falls back to mail")
 deepEqual(nav.replaceRoot(helpOverCompose, "list"), [{ kind: "list" }])
 deepEqual(nav.resetTo(helpOverCompose, "list"), [{ kind: "list" }])
 deepEqual(nav.resetTo(reader1, "picker"), [{ kind: "picker" }],
@@ -183,8 +187,9 @@ deepEqual(nav.replaceRoot(null, "calendar"), [{ kind: "calendar" }])
 // view the user left it on.
 deepEqual(nav.rootFor({ anyReady: true, view: "list" }), [{ kind: "list" }])
 deepEqual(nav.rootFor({ anyReady: true, view: "calendar" }), [{ kind: "calendar" }])
+deepEqual(nav.rootFor({ anyReady: true, view: "contacts" }), [{ kind: "contacts" }])
 deepEqual(nav.rootFor({ anyReady: true, view: "reader" }), [{ kind: "list" }],
-  "only the calendar is a root; anything else is the list")
+  "only declared roots survive; anything else is the list")
 deepEqual(nav.rootFor({ anyReady: true }), [{ kind: "list" }])
 
 // First run: nothing saved, so the question comes first.

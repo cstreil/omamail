@@ -23,14 +23,15 @@ Item {
     property bool contactsDirectoryBusy: false
     property var openContact: null
     property string contactsDirectoryError: ""
+    property string contactsDirectoryDetailError: ""
 
     property var listCalls: []
     property var sourceCalls: []
     property var detailCalls: []
     property int closeCalls: 0
 
-    function refreshContactSources(accountId) {
-      sourceCalls.push(String(accountId))
+    function refreshContactSources(accountId, query) {
+      sourceCalls.push({ accountId: String(accountId), query: String(query || "") })
     }
     function refreshContactList(accountId, query) {
       listCalls.push({ accountId: String(accountId), query: String(query) })
@@ -93,6 +94,7 @@ Item {
       directory.contactTotal = 2
       directory.openContact = null
       directory.contactsDirectoryError = ""
+      directory.contactsDirectoryDetailError = ""
       directory.listCalls = []
       directory.sourceCalls = []
       directory.detailCalls = []
@@ -116,6 +118,24 @@ Item {
       field.text = "bob"
       tryCompare(directory.listCalls, "length", 1)
       compare(directory.listCalls[0].query, "bob")
+      view.refresh(directory.activeAccountId)
+      compare(directory.sourceCalls[directory.sourceCalls.length - 1].query, "bob",
+        "refresh keeps the query visible in the field and active in the request")
+      compare(field.text, "bob")
+    }
+
+    function test_escape_clears_search_with_one_request() {
+      var field = named(view, "contact-search")
+      field.text = "bob"
+      tryCompare(directory.listCalls, "length", 1)
+      directory.listCalls = []
+      compare(view.goBack(), true)
+      compare(field.text, "")
+      compare(directory.listCalls.length, 1)
+      compare(directory.listCalls[0].query, "")
+      wait(250)
+      compare(directory.listCalls.length, 1,
+        "the text change must not leave a duplicate debounce request armed")
     }
 
     function test_keyboard_moves_selection_and_opens_a_contact() {
@@ -154,7 +174,14 @@ Item {
       directory.contactsDirectoryError = "This account has no address book."
       compare(named(view, "contact-message").text, "This account has no address book.")
       compare(named(view, "contact-list").visible, false,
-        "an error replaces the list instead of pretending it is empty")
+        "a source/list error replaces the list instead of pretending it is empty")
+
+      directory.contactsDirectoryError = ""
+      directory.contactsDirectoryDetailError = "This contact no longer exists."
+      directory.contactRows = [{ id: "live", name: "Alice", emails: ["alice@example.test"] }]
+      compare(named(view, "contact-message").text, "This contact no longer exists.")
+      compare(named(view, "contact-list").visible, true,
+        "a detail-only failure keeps the recoverable list usable")
     }
   }
 }

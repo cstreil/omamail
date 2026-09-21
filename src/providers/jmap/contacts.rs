@@ -33,15 +33,17 @@ impl Session {
         let result = tokio::time::timeout(CALL_TIME, async {
             let books = self.books(&context, &snapshot, &account).await?;
             let source = choose_source(&books)?;
-            let (cards, missing) = self
-                .cards_for(
+            let ids = self
+                .query_card_ids(
                     &context,
                     &snapshot,
                     &account,
-                    &source,
+                    json!({"inAddressBook": source}),
                     MAX_REMOTE_CONTACTS,
-                    0,
                 )
+                .await?;
+            let (cards, missing) = self
+                .cards(&context, &snapshot, &account, &ids, CARD_PROPERTIES)
                 .await?;
             if missing > 0 {
                 return Err("jmap_invalid_response");
@@ -85,7 +87,7 @@ impl Session {
                 filter["text"] = json!(query);
             }
             let ids = self
-                .card_ids(&context, &snapshot, &account, filter, MAX_LIST)
+                .query_card_ids(&context, &snapshot, &account, filter, MAX_LIST)
                 .await?;
             let (cards, missing) = self
                 .cards(&context, &snapshot, &account, &ids, CARD_PROPERTIES)
@@ -182,7 +184,10 @@ impl Session {
         Ok(books.clone())
     }
 
-    async fn card_ids(
+    /// Read every server-sized ContactCard/query page up to our own hard cap.
+    /// `limit` is a ceiling for the whole result, not a promise about one page:
+    /// RFC 8620 permits a server to return fewer ids than the client requests.
+    async fn query_card_ids(
         &self,
         context: &mailbox::Context,
         snapshot: &mailbox::Snapshot,
@@ -190,79 +195,83 @@ impl Session {
         filter: Value,
         limit: usize,
     ) -> Result<Vec<String>, &'static str> {
-        let result = self
-            .api_using(
-                context,
-                snapshot,
-                json!([["ContactCard/query", {
-                    "accountId": account,
-                    "filter": filter,
-                    "position": 0,
-                    "limit": limit,
-                    "calculateTotal": true
-                }, "contacts-query"]]),
-                json!([CORE, CONTACTS]),
-            )
-            .await?;
-        let query = mailbox::argument(&result, "contacts-query", "ContactCard/query")?;
-        let raw_ids = query["ids"].as_array().ok_or("jmap_invalid_response")?;
-        if raw_ids.len() > limit
-            || query["total"]
+        let mut ids = Vec::new();
+        let mut seen = HashSet::new();
+        let mut expected_total = None;
+        let mut expected_state: Option<String> = None;
+        let mut position = 0usize;
+        loop {
+            let remaining = limit.saturating_sub(ids.len());
+            if remaining == 0 && expected_total.is_some_and(|total| position < total) {
+                return Err("contacts_too_many");
+            }
+            let result = self
+                .api_using(
+                    context,
+                    snapshot,
+                    json!([["ContactCard/query", {
+                        "accountId": account,
+                        "filter": filter.clone(),
+                        "position": position,
+                        "limit": remaining,
+                        "calculateTotal": true
+                    }, "contacts-query"]]),
+                    json!([CORE, CONTACTS]),
+                )
+                .await?;
+            let query = mailbox::argument(&result, "contacts-query", "ContactCard/query")?;
+            let returned_position = query["position"]
                 .as_u64()
-                .is_some_and(|total| total > limit as u64)
-        {
-            return Err("contacts_too_many");
-        }
-        let mut seen = HashSet::new();
-        let mut ids = Vec::with_capacity(raw_ids.len());
-        for value in raw_ids {
-            let id = bounded_id(value.as_str().ok_or("jmap_invalid_response")?)?;
-            if !seen.insert(id.to_owned()) {
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or("jmap_invalid_response")?;
+            if returned_position != position {
                 return Err("jmap_invalid_response");
             }
-            ids.push(id.to_owned());
-        }
-        Ok(ids)
-    }
-
-    async fn cards_for(
-        &self,
-        context: &mailbox::Context,
-        snapshot: &mailbox::Snapshot,
-        account: &str,
-        source: &str,
-        limit: usize,
-        position: usize,
-    ) -> Result<(Vec<Value>, usize), &'static str> {
-        let result = self
-            .api_using(
-                context,
-                snapshot,
-                json!([["ContactCard/query", {
-                    "accountId": account,
-                    "filter": {"inAddressBook": source},
-                    "position": position,
-                    "limit": limit
-                }, "contacts-query"]]),
-                json!([CORE, CONTACTS]),
-            )
-            .await?;
-        let query = mailbox::argument(&result, "contacts-query", "ContactCard/query")?;
-        let raw_ids = query["ids"].as_array().ok_or("jmap_invalid_response")?;
-        if raw_ids.len() > limit {
-            return Err("jmap_response_too_large");
-        }
-        let mut seen = HashSet::new();
-        let mut ids = Vec::with_capacity(raw_ids.len());
-        for value in raw_ids {
-            let id = bounded_id(value.as_str().ok_or("jmap_invalid_response")?)?;
-            if !seen.insert(id.to_owned()) {
+            let total = query["total"]
+                .as_u64()
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or("jmap_invalid_response")?;
+            if total > limit {
+                return Err("contacts_too_many");
+            }
+            if expected_total.is_some_and(|expected| expected != total) {
                 return Err("jmap_invalid_response");
             }
-            ids.push(id.to_owned());
+            expected_total = Some(total);
+            let state = bounded_id(
+                query["queryState"]
+                    .as_str()
+                    .ok_or("jmap_invalid_response")?,
+            )?;
+            if expected_state
+                .as_deref()
+                .is_some_and(|expected| expected != state)
+            {
+                return Err("jmap_invalid_response");
+            }
+            expected_state = Some(state.to_owned());
+            let raw_ids = query["ids"].as_array().ok_or("jmap_invalid_response")?;
+            if raw_ids.len() > remaining {
+                return Err("jmap_response_too_large");
+            }
+            for value in raw_ids {
+                let id = bounded_id(value.as_str().ok_or("jmap_invalid_response")?)?;
+                if !seen.insert(id.to_owned()) {
+                    return Err("jmap_invalid_response");
+                }
+                ids.push(id.to_owned());
+            }
+            let next = position
+                .checked_add(raw_ids.len())
+                .ok_or("jmap_invalid_response")?;
+            if next > total || (next < total && next == position) {
+                return Err("jmap_invalid_response");
+            }
+            position = next;
+            if position == total {
+                return Ok(ids);
+            }
         }
-        self.cards(context, snapshot, account, &ids, CARD_PROPERTIES)
-            .await
     }
 
     /// Fetches cards and reports how many requested ids the server did not
@@ -277,6 +286,7 @@ impl Session {
     ) -> Result<(Vec<Value>, usize), &'static str> {
         let mut cards = Vec::with_capacity(ids.len());
         let mut missing = 0usize;
+        let mut bytes = 0usize;
         for (index, chunk) in ids
             .chunks(snapshot.limit("maxObjectsInGet", 256))
             .enumerate()
@@ -304,12 +314,24 @@ impl Session {
                 if !expected.contains(id) || !returned.insert(id.to_owned()) {
                     return Err("jmap_invalid_response");
                 }
+                charge_json_bytes(&mut bytes, card, super::MAX_BODY)?;
                 cards.push(card.clone());
             }
             missing += expected.len() - returned.len();
         }
         Ok((cards, missing))
     }
+}
+
+fn charge_json_bytes(used: &mut usize, value: &Value, limit: usize) -> Result<(), &'static str> {
+    let size = serde_json::to_vec(value)
+        .map_err(|_| "jmap_invalid_response")?
+        .len();
+    *used = used.checked_add(size).ok_or("jmap_response_too_large")?;
+    if *used > limit {
+        return Err("jmap_response_too_large");
+    }
+    Ok(())
 }
 
 fn note<T>(context: &mailbox::Context, result: &Result<T, &'static str>) {
@@ -372,6 +394,9 @@ fn readable_book(books: &[Value], source: &str) -> Result<bool, &'static str> {
 fn sources_of(books: &[Value]) -> Result<Value, &'static str> {
     let mut sources = Vec::with_capacity(books.len());
     for book in books {
+        if !readable(book) {
+            continue;
+        }
         let rights = &book["myRights"];
         sources.push(json!({
             "id": bounded_id(book["id"].as_str().ok_or("jmap_invalid_response")?)?,
@@ -557,7 +582,7 @@ fn normalize(cards: &[Value]) -> Result<Value, &'static str> {
         // One hostile card must not cost the whole address book: malformed
         // names are cleaned, malformed addresses are left for the shared
         // contact validation to drop.
-        let name = clean(card["name"]["full"].as_str().unwrap_or(""), MAX_TEXT);
+        let name = display_name(&card["name"]);
         let Some(emails) = card["emails"].as_object() else {
             continue;
         };
@@ -618,6 +643,27 @@ mod tests {
     }
 
     #[test]
+    fn cumulative_card_bytes_share_one_bounded_budget() {
+        let first = json!({"id":"one","name":{"full":"Alice"}});
+        let second = json!({"id":"two","name":{"full":"Bob"}});
+        let exact =
+            serde_json::to_vec(&first).unwrap().len() + serde_json::to_vec(&second).unwrap().len();
+        let mut used = 0;
+        assert_eq!(charge_json_bytes(&mut used, &first, exact), Ok(()));
+        assert_eq!(charge_json_bytes(&mut used, &second, exact), Ok(()));
+        assert_eq!(used, exact, "the exact cumulative ceiling is allowed");
+        assert_eq!(
+            charge_json_bytes(&mut used, &json!({"id":"three"}), exact),
+            Err("jmap_response_too_large")
+        );
+        let mut overflow = usize::MAX;
+        assert_eq!(
+            charge_json_bytes(&mut overflow, &json!(null), usize::MAX),
+            Err("jmap_response_too_large")
+        );
+    }
+
+    #[test]
     fn contacts_primary_account_is_independent_from_mail() {
         let value = snapshot(json!({
             "capabilities": {CONTACTS: {}},
@@ -660,12 +706,15 @@ mod tests {
             {"id":"b","name":"Address Book","isDefault":true,"isSubscribed":true,"myRights":{"mayRead":true,"mayWrite":true}},
             {"id":"c","name":"Trusted\nSenders","isSubscribed":false,"myRights":{"mayRead":true}}
         ]);
+        let mut books = books.as_array().unwrap().clone();
+        books.insert(0, json!({"id":"hidden","name":"Hidden","isDefault":true,"isSubscribed":true,"myRights":{"mayRead":false,"mayWrite":true}}));
         assert_eq!(
-            sources_of(books.as_array().unwrap()).unwrap(),
+            sources_of(&books).unwrap(),
             json!({"sources": [
                 {"id":"b","name":"Address Book","default":true,"subscribed":true,"readOnly":false},
                 {"id":"c","name":"TrustedSenders","default":false,"subscribed":false,"readOnly":true}
-            ]})
+            ]}),
+            "unreadable books are not UI sources; readOnly describes write access only"
         );
     }
 
@@ -682,6 +731,16 @@ mod tests {
         }]);
         let rows = normalize(cards.as_array().unwrap()).unwrap();
         assert_eq!(rows, json!([{"name":"Alice","email":"Alice@example.com"}]));
+        let structured = json!([{
+            "id":"two",
+            "name":{"components":[{"kind":"given","value":"Jane"},{"kind":"surname","value":"Doe"}]},
+            "emails":{"a":{"address":"jane@example.test"}}
+        }]);
+        assert_eq!(
+            normalize(structured.as_array().unwrap()).unwrap(),
+            json!([{"name":"Jane Doe","email":"jane@example.test"}]),
+            "suggestions reuse the same structured-name projection as list and detail"
+        );
     }
 
     #[test]
@@ -761,14 +820,18 @@ mod tests {
         }
     }
 
-    async fn fixture_session() -> (Peer, Session, String) {
+    async fn fixture_session_for(scenario: &str) -> (Peer, Session, String) {
         use std::io::{BufRead, BufReader};
+        let mut command = std::process::Command::new("python3");
+        command.arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/providers/jmap/mailbox_tls_test.py"
+        ));
+        if scenario != "default" {
+            command.arg(scenario);
+        }
         let mut peer = Peer(
-            std::process::Command::new("python3")
-                .arg(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/providers/jmap/mailbox_tls_test.py"
-                ))
+            command
                 .stdout(std::process::Stdio::piped())
                 .spawn()
                 .unwrap(),
@@ -814,6 +877,32 @@ mod tests {
         (peer, session, account)
     }
 
+    async fn fixture_session() -> (Peer, Session, String) {
+        fixture_session_for("default").await
+    }
+
+    #[tokio::test]
+    async fn rejects_inconsistent_or_nonprogressing_contact_query_pages() {
+        for scenario in [
+            "contact-query-stall",
+            "contact-query-duplicate",
+            "contact-query-wrong-position",
+            "contact-query-state-change",
+        ] {
+            let (_peer, session, account) = fixture_session_for(scenario).await;
+            assert_eq!(
+                session.contact_suggestions(&account).await,
+                Err("jmap_invalid_response"),
+                "{scenario} must fail closed"
+            );
+        }
+        let (_peer, session, account) = fixture_session_for("contact-query-too-many").await;
+        assert_eq!(
+            session.contact_suggestions(&account).await,
+            Err("contacts_too_many")
+        );
+    }
+
     #[tokio::test]
     async fn reads_contact_suggestions_through_native_jmap_transport() {
         let (_peer, session, account) = fixture_session().await;
@@ -835,7 +924,6 @@ mod tests {
         assert_eq!(
             sources,
             json!({"sources":[
-                {"id":"hidden","name":"Hidden","default":true,"subscribed":true,"readOnly":true},
                 {"id":"book","name":"Contacts","default":true,"subscribed":true,"readOnly":false}
             ]})
         );

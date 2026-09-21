@@ -551,10 +551,11 @@ for component_id in ("listColumn", "reader"):
     start = app.index(marker)
     end = app.find("\n        }", start)
     block = app[start:end]
-    if "!root.calendarVisible" not in block:
-        raise SystemExit(
-            f"test_source.sh: {component_id} must be inactive behind the calendar view"
-        )
+    for view in ("calendar", "contacts"):
+        if f"!root.{view}Visible" not in block:
+            raise SystemExit(
+                f"test_source.sh: {component_id} must be inactive behind the {view} view"
+            )
 PY
 [ -f components/CalendarEventDetail.qml ] \
   || fail "calendar events need an in-app overview page"

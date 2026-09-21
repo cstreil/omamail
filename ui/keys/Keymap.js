@@ -133,6 +133,14 @@ var BINDINGS = [
     group: "Calendar", label: "Show week view" },
   { id: "calendarMonth", keys: ["m"], contexts: ["calendar"],
     group: "Calendar", label: "Show month view" },
+  { id: "contactNext", keys: ["j", "Down"], contexts: ["contacts"],
+    group: "Contacts", label: "Select the next contact" },
+  { id: "contactPrevious", keys: ["k", "Up"], contexts: ["contacts"],
+    group: "Contacts", label: "Select the previous contact" },
+  { id: "openContact", keys: ["Return", "Enter", "o"], contexts: ["contacts"],
+    group: "Contacts", label: "Open the selected contact" },
+  { id: "searchContacts", keys: ["/"], contexts: ["contacts"],
+    group: "Contacts", label: "Search contacts" },
   // Both Enters: the main keyboard's is Return, the numpad's is Enter, and
   // a hand on the numpad expects the same thing of them.
   { id: "send", keys: ["Ctrl+Return", "Ctrl+Enter"], contexts: ["compose"],

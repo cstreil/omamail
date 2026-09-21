@@ -41,6 +41,7 @@ Rectangle {
     anchors.horizontalCenter: root.leftAlign ? undefined : parent.horizontalCenter
     anchors.verticalCenter: parent.verticalCenter
     text: root.text
+    textFormat: Text.PlainText
     color: root.foreground
     font.family: root.fontFamily
     font.pixelSize: root.fontSize

@@ -246,6 +246,13 @@ assert.strictEqual(keymap.isEnabled(createEvent, "compose", false), false)
 })
 assert.strictEqual(keymap.displayFor(byId("calendarToday")), "t",
   "t returns the calendar to today")
+;["contactNext", "contactPrevious", "openContact", "searchContacts"].forEach(function(id) {
+  assert.ok(byId(id), id + " must be listed in the shared key map")
+  assert.strictEqual(keymap.isEnabled(byId(id), "contacts", false), true)
+  assert.strictEqual(keymap.isEnabled(byId(id), "list", false), false)
+})
+assert.strictEqual(keymap.displayFor(byId("searchContacts")), "/",
+  "the contact search is entered through the shared router")
 const mailView = byId("mailView")
 const calendarView = byId("calendarView")
 assert.strictEqual(keymap.displayFor(mailView), "Ctrl+Shift+M")
