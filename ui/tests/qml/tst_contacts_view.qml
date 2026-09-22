@@ -3,6 +3,7 @@ import QtTest
 import "../../components" as Omamail
 
 Item {
+  id: host
   width: 900
   height: 600
 
@@ -86,6 +87,7 @@ Item {
     }
 
     function init() {
+      host.width = 900
       directory.contactSource = "book"
       directory.contactRows = [
         ({ id: "one", name: "Alice", emails: ["alice@example.test"], source: "book" }),
@@ -101,6 +103,32 @@ Item {
       directory.closeCalls = 0
       view.query = ""
       view.selectedId = ""
+    }
+
+    function test_wide_view_has_three_named_panes_and_alphabetic_sections() {
+      var sources = named(view, "contact-source-sidebar")
+      var listPane = named(view, "contact-list-pane")
+      var detail = named(view, "contact-detail")
+      verify(sources && listPane && detail)
+      compare(sources.visible, true)
+      compare(listPane.visible, true)
+      compare(detail.visible, true)
+      tryVerify(function() { return named(view, "contact-section-A") !== null })
+      tryVerify(function() { return named(view, "contact-section-B") !== null })
+    }
+
+    function test_compact_view_keeps_source_switching_available() {
+      host.width = 620
+      tryCompare(view, "narrow", true)
+      compare(named(view, "contact-source-sidebar").visible, false)
+      compare(named(view, "contact-compact-sources").visible, true)
+    }
+
+    function test_detail_fields_are_grouped_into_sections() {
+      view.activate("one")
+      verify(named(view, "contact-detail-section-email") !== null)
+      verify(named(view, "contact-detail-section-phone") !== null)
+      verify(named(view, "contact-detail-section-address") !== null)
     }
 
     function test_rows_sources_and_search_reach_the_directory() {

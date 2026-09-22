@@ -3,9 +3,9 @@ import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 
-// The address book as a place of its own: one source at a time, a bounded list
-// and one open contact. It reads through Service, which owns the account and
-// request generation, so nothing here has to know which provider answered.
+// A desktop address book: lists on the left, people in the middle and one
+// contact card on the right. Service owns provider and request state; this view
+// only gives that state the calm, sectioned shape of a native contacts app.
 Item {
   id: root
   objectName: "contacts-view"
@@ -24,20 +24,25 @@ Item {
   readonly property var rows: root.service && Array.isArray(root.service.contactRows)
     ? root.service.contactRows : []
   readonly property var contact: root.service ? root.service.openContact : null
-  readonly property string errorText: root.service ? String(root.service.contactsDirectoryError || "") : ""
+  readonly property string errorText: root.service
+    ? String(root.service.contactsDirectoryError || "") : ""
   readonly property string detailError: root.service
     ? String(root.service.contactsDirectoryDetailError || "") : ""
   readonly property bool busy: root.service ? root.service.contactsDirectoryBusy === true : false
   readonly property bool sourceSelected: root.service
     ? String(root.service.contactSource || "") !== "" : false
-  readonly property bool narrow: width < Style.space(620)
-  readonly property bool listVisible: !narrow || !root.contact
+  readonly property bool narrow: width < Style.space(720)
+  readonly property bool listVisible: !narrow || root.contact === null
   readonly property bool searchFocused: searchField.activeFocus
+  readonly property var sectionRows: root.rowsForSections(root.rows)
+  readonly property var detailGroups: root.contact ? [
+    { key: "email", title: "Email", fallback: "email", rows: root.contact.emails || [] },
+    { key: "phone", title: "Phone", fallback: "phone", rows: root.contact.phones || [] },
+    { key: "address", title: "Address", fallback: "address", rows: root.contact.addresses || [] }
+  ] : []
 
   property string query: ""
   property string selectedId: ""
-  // The view is a place: becoming active is what loads it, so the window does
-  // not have to remember to ask in every path that leads here.
   property bool active: false
 
   onActiveChanged: if (active) refresh(root.service ? root.service.activeAccountId : "")
@@ -46,6 +51,53 @@ Item {
     anchors.fill: parent
     color: root.backgroundColor
     z: -1
+  }
+
+  function rowName(row) {
+    var name = String(row && row.name || "").trim()
+    if (name !== "") return name
+    var emails = row && Array.isArray(row.emails) ? row.emails : []
+    return emails.length > 0 ? String(emails[0]) : "Unnamed Contact"
+  }
+
+  function sectionName(row) {
+    var name = rowName(row)
+    if (name === "") return "#"
+    var initial = name.charAt(0).toUpperCase()
+    return initial >= "A" && initial <= "Z" ? initial : "#"
+  }
+
+  function rowsForSections(values) {
+    var result = []
+    for (var i = 0; i < values.length; i++) {
+      var row = values[i] || ({})
+      result.push({
+        id: String(row.id || ""),
+        name: String(row.name || ""),
+        displayName: rowName(row),
+        emails: Array.isArray(row.emails) ? row.emails : [],
+        source: String(row.source || ""),
+        sectionName: sectionName(row)
+      })
+    }
+    return result
+  }
+
+  function selectedSourceName() {
+    var selected = root.service ? String(root.service.contactSource || "") : ""
+    for (var i = 0; i < root.sources.length; i++) {
+      if (String(root.sources[i].id || "") === selected)
+        return String(root.sources[i].name || root.sources[i].id || "")
+    }
+    return "Contacts"
+  }
+
+  function initials(value) {
+    var words = String(value || "").trim().split(/\s+/)
+    if (words.length === 0 || words[0] === "") return "?"
+    var first = words[0].charAt(0)
+    var last = words.length > 1 ? words[words.length - 1].charAt(0) : ""
+    return (first + last).toUpperCase()
   }
 
   function refresh(accountId) {
@@ -106,14 +158,12 @@ Item {
     for (var i = 0; i < root.rows.length; i++) {
       if (String(root.rows[i].id) === root.selectedId) { index = i; break }
     }
-    // Movement from nothing starts at the edge the movement comes from.
     if (index < 0) index = step > 0 ? 0 : root.rows.length - 1
     else index = Math.max(0, Math.min(root.rows.length - 1, index + step))
     root.selectedId = String(root.rows[index].id)
     contactList.positionViewAtIndex(index, ListView.Contain)
   }
 
-  // A keystroke must not become one query per character.
   Timer {
     id: searchDebounce
     interval: 200
@@ -121,204 +171,342 @@ Item {
   }
 
   Row {
+    id: panes
     anchors.fill: parent
-    anchors.margins: Style.space(10)
-    spacing: Style.space(10)
+    spacing: 0
 
-    // Sources, search and the bounded list.
-    Column {
-      id: listColumn
-      visible: root.listVisible
-      width: root.narrow ? parent.width : Math.min(Style.space(340), parent.width / 2)
+    Rectangle {
+      id: sourcePane
+      objectName: "contact-source-sidebar"
+      visible: !root.narrow
+      width: visible ? Math.min(Style.space(190), Math.max(Style.space(156), panes.width * 0.2)) : 0
       height: parent.height
-      spacing: Style.space(8)
+      color: root.popupBackgroundColor
 
-      Row {
-        width: parent.width
-        spacing: Style.space(6)
+      Column {
+        anchors.fill: parent
+        anchors.margins: Style.space(12)
+        spacing: Style.space(8)
 
         Text {
-          text: "Contacts"
+          text: "Lists"
+          textFormat: Text.PlainText
           color: root.textColor
           font.family: root.panelFontFamily
-          font.pixelSize: Style.font.bodySmall
+          font.pixelSize: Style.font.title
           font.bold: true
-          anchors.verticalCenter: parent.verticalCenter
         }
 
         Text {
-          text: root.service && root.service.contactsDirectoryAccountId !== ""
-            ? "(" + root.rows.length + (root.service.contactTotal > root.rows.length
-              ? " of " + root.service.contactTotal : "") + ")" : ""
+          text: "ADDRESS BOOKS"
+          textFormat: Text.PlainText
           color: root.dimColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption
-          anchors.verticalCenter: parent.verticalCenter
+          font.bold: true
         }
-      }
 
-      // One button per readable address book. Service preserves an existing
-      // choice, then falls back to the server's readable default.
-      Flow {
-        id: sourceRow
-        objectName: "contact-sources"
-        width: parent.width
-        spacing: Style.space(4)
-        visible: root.sources.length > 1
+        Column {
+          width: parent.width
+          spacing: Style.space(2)
 
-        Repeater {
-          model: root.sources
-          delegate: Button {
-            required property var modelData
-            objectName: "contact-source-" + String(modelData.id)
-            text: String(modelData.name || modelData.id || "")
-            bordered: true
-            fontSize: Style.font.caption
-            foreground: String(modelData.id) === String(root.service
-              ? root.service.contactSource : "") ? root.accentColor : root.dimColor
-            onClicked: root.selectSource(modelData.id)
-          }
-        }
-      }
+          Repeater {
+            model: root.sources
 
-      TextField {
-        id: searchField
-        objectName: "contact-search"
-        width: parent.width
-        foreground: root.textColor
-        accent: root.accentColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-        placeholderText: "Search contacts..."
-        onTextChanged: {
-          root.query = text
-          searchDebounce.restart()
-        }
-        onAccepted: {
-          searchDebounce.stop()
-          root.submitQuery()
-        }
-      }
+            delegate: Rectangle {
+              id: sourceEntry
+              required property var modelData
+              readonly property bool selected: String(modelData.id || "") === String(
+                root.service ? root.service.contactSource : "")
+              objectName: "contact-source-" + String(modelData.id || "")
+              width: parent.width
+              implicitHeight: Style.space(32)
+              radius: Style.cornerRadius
+              color: selected ? Style.selectedFillFor(root.textColor, root.accentColor)
+                : (sourceHover.hovered ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
 
-      Text {
-        objectName: "contact-message"
-        visible: root.errorText !== "" || root.detailError !== ""
-          || (root.selectedId === "" && root.rows.length === 0)
-        width: parent.width
-        wrapMode: Text.WordWrap
-        textFormat: Text.PlainText
-        text: root.errorText !== "" ? root.errorText
-          : (root.detailError !== "" ? root.detailError
-          : (root.sourceSelected ? "No contacts found." : "No address book on this account."))
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-      }
-
-      ListView {
-        id: contactList
-        objectName: "contact-list"
-        width: parent.width
-        height: parent.height - y
-        visible: root.errorText === ""
-        clip: true
-        spacing: Style.space(1)
-        model: root.rows
-        QQC.ScrollBar.vertical: QQC.ScrollBar { policy: QQC.ScrollBar.AsNeeded }
-
-        delegate: Rectangle {
-          id: contactRow
-          required property var modelData
-          required property int index
-
-          width: contactList.width
-          implicitHeight: Style.space(46)
-          radius: Style.cornerRadius
-          color: String(contactRow.modelData.id) === root.selectedId
-            ? Style.selectedFillFor(root.textColor, root.accentColor)
-            : (rowHover.hovered ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
-
-          Rectangle {
-            id: avatar
-            anchors.left: parent.left
-            anchors.leftMargin: Style.space(6)
-            anchors.verticalCenter: parent.verticalCenter
-            width: Style.space(26)
-            height: width
-            radius: width / 2
-            color: Style.selectedFillFor(root.textColor, root.accentColor)
-
-            Text {
-              anchors.centerIn: parent
-              textFormat: Text.PlainText
-              text: {
-                var name = String(contactRow.modelData.name || "")
-                if (name === "") name = String((contactRow.modelData.emails || [])[0] || "")
-                return name.length > 0 ? name.charAt(0).toUpperCase() : "?"
+              Rectangle {
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                width: Style.space(7)
+                height: width
+                radius: width / 2
+                color: sourceEntry.selected ? root.accentColor : root.dimColor
+                opacity: sourceEntry.selected ? 1 : 0.65
               }
-              color: root.textColor
-              font.family: root.panelFontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
+
+              Text {
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(22)
+                anchors.right: sourceCount.left
+                anchors.rightMargin: Style.space(4)
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: String(sourceEntry.modelData.name || sourceEntry.modelData.id || "")
+                color: sourceEntry.selected ? root.textColor : root.dimColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: sourceEntry.selected
+                elide: Text.ElideRight
+              }
+
+              Text {
+                id: sourceCount
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                visible: sourceEntry.selected && root.service
+                text: visible ? String(root.service.contactTotal || root.rows.length) : ""
+                color: root.dimColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              HoverHandler { id: sourceHover }
+              TapHandler { onTapped: root.selectSource(sourceEntry.modelData.id) }
             }
-          }
-
-          Column {
-            anchors.left: avatar.right
-            anchors.leftMargin: Style.space(8)
-            anchors.right: parent.right
-            anchors.rightMargin: Style.space(8)
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(1)
-
-            Text {
-              width: parent.width
-              textFormat: Text.PlainText
-              text: String(contactRow.modelData.name || "")
-              visible: text !== ""
-              color: root.textColor
-              font.family: root.panelFontFamily
-              font.pixelSize: Style.font.bodySmall
-              font.bold: true
-              elide: Text.ElideRight
-            }
-
-            Text {
-              width: parent.width
-              textFormat: Text.PlainText
-              text: String((contactRow.modelData.emails || [])[0] || "")
-              color: root.dimColor
-              font.family: root.panelFontFamily
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideMiddle
-            }
-          }
-
-          HoverHandler { id: rowHover }
-          TapHandler {
-            gesturePolicy: TapHandler.ReleaseWithinBounds
-            onTapped: root.activate(contactRow.modelData.id)
           }
         }
       }
     }
 
-    // The open contact, or a plain statement that nothing is open.
+    Rectangle {
+      width: sourcePane.visible ? 1 : 0
+      height: parent.height
+      visible: sourcePane.visible
+      color: root.popupBorderColor
+      opacity: 0.65
+    }
+
+    Rectangle {
+      id: listPane
+      objectName: "contact-list-pane"
+      visible: root.listVisible
+      width: visible ? (root.narrow ? panes.width
+        : Math.min(Style.space(330), Math.max(Style.space(270), panes.width * 0.34))) : 0
+      height: parent.height
+      color: root.backgroundColor
+
+      Column {
+        id: listContent
+        anchors.fill: parent
+        anchors.margins: Style.space(12)
+        spacing: Style.space(8)
+
+        Row {
+          width: parent.width
+          spacing: Style.space(6)
+
+          Text {
+            width: parent.width - listCount.width - parent.spacing
+            textFormat: Text.PlainText
+            text: root.selectedSourceName()
+            color: root.textColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.title
+            font.bold: true
+            elide: Text.ElideRight
+          }
+
+          Text {
+            id: listCount
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: root.service && root.service.contactsDirectoryAccountId !== ""
+              ? String(root.rows.length) + (root.service.contactTotal > root.rows.length
+              ? " of " + root.service.contactTotal : "") : ""
+            color: root.dimColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
+
+        Flow {
+          id: compactSources
+          objectName: "contact-compact-sources"
+          visible: root.narrow && root.sources.length > 1
+          width: parent.width
+          height: visible ? childrenRect.height : 0
+          spacing: Style.space(4)
+
+          Repeater {
+            model: root.sources
+            delegate: Button {
+              required property var modelData
+              objectName: "contact-compact-source-" + String(modelData.id || "")
+              text: String(modelData.name || modelData.id || "")
+              bordered: true
+              fontSize: Style.font.caption
+              foreground: String(modelData.id || "") === String(root.service
+                ? root.service.contactSource : "") ? root.accentColor : root.dimColor
+              onClicked: root.selectSource(modelData.id)
+            }
+          }
+        }
+
+        TextField {
+          id: searchField
+          objectName: "contact-search"
+          width: parent.width
+          foreground: root.textColor
+          accent: root.accentColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          placeholderText: "Search"
+          onTextChanged: {
+            root.query = text
+            searchDebounce.restart()
+          }
+          onAccepted: {
+            searchDebounce.stop()
+            root.submitQuery()
+          }
+        }
+
+        Text {
+          objectName: "contact-message"
+          visible: root.errorText !== "" || root.detailError !== ""
+            || (root.selectedId === "" && root.rows.length === 0)
+          width: parent.width
+          wrapMode: Text.WordWrap
+          textFormat: Text.PlainText
+          text: root.errorText !== "" ? root.errorText
+            : (root.detailError !== "" ? root.detailError
+            : (root.sourceSelected ? "No contacts found." : "No address book on this account."))
+          color: root.detailError !== "" ? root.accentColor : root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+        }
+
+        ListView {
+          id: contactList
+          objectName: "contact-list"
+          width: parent.width
+          height: Math.max(0, parent.height - y)
+          visible: root.errorText === ""
+          clip: true
+          spacing: Style.space(1)
+          model: root.sectionRows
+          section.property: "sectionName"
+          section.criteria: ViewSection.FullString
+          QQC.ScrollBar.vertical: QQC.ScrollBar { policy: QQC.ScrollBar.AsNeeded }
+
+          section.delegate: Rectangle {
+            required property string section
+            objectName: "contact-section-" + section
+            width: contactList.width
+            implicitHeight: Style.space(24)
+            color: root.backgroundColor
+
+            Text {
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(8)
+              anchors.bottom: parent.bottom
+              anchors.bottomMargin: Style.space(3)
+              textFormat: Text.PlainText
+              text: section
+              color: root.accentColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+          }
+
+          delegate: Rectangle {
+            id: contactRow
+            required property var modelData
+            required property int index
+            width: contactList.width
+            implicitHeight: Style.space(48)
+            radius: Style.cornerRadius
+            color: String(contactRow.modelData.id) === root.selectedId
+              ? Style.selectedFillFor(root.textColor, root.accentColor)
+              : (rowHover.hovered ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+
+            Rectangle {
+              id: avatar
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(7)
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(28)
+              height: width
+              radius: width / 2
+              color: Style.selectedFillFor(root.textColor, root.accentColor)
+
+              Text {
+                anchors.centerIn: parent
+                textFormat: Text.PlainText
+                text: root.initials(contactRow.modelData.displayName)
+                color: root.textColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+              }
+            }
+
+            Column {
+              anchors.left: avatar.right
+              anchors.leftMargin: Style.space(8)
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(1)
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: String(contactRow.modelData.displayName || "")
+                color: root.textColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: String(contactRow.modelData.id) === root.selectedId
+                elide: Text.ElideRight
+              }
+
+              Text {
+                width: parent.width
+                visible: (contactRow.modelData.emails || []).length > 0
+                textFormat: Text.PlainText
+                text: String((contactRow.modelData.emails || [])[0] || "")
+                color: root.dimColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideMiddle
+              }
+            }
+
+            HoverHandler { id: rowHover }
+            TapHandler {
+              gesturePolicy: TapHandler.ReleaseWithinBounds
+              onTapped: root.activate(contactRow.modelData.id)
+            }
+          }
+        }
+      }
+    }
+
+    Rectangle {
+      width: listPane.visible && !root.narrow ? 1 : 0
+      height: parent.height
+      visible: width > 0
+      color: root.popupBorderColor
+      opacity: 0.65
+    }
+
     Rectangle {
       id: detailPane
       objectName: "contact-detail"
-      visible: !root.listVisible || root.contact !== null
-      width: root.narrow ? parent.width : parent.width - listColumn.width - parent.spacing
+      visible: !root.narrow || root.contact !== null
+      width: visible ? Math.max(0, panes.width - sourcePane.width - listPane.width
+        - (sourcePane.visible ? 1 : 0) - (listPane.visible && !root.narrow ? 1 : 0)) : 0
       height: parent.height
-      radius: Style.cornerRadius
-      color: "transparent"
-      border.width: 1
-      border.color: root.popupBorderColor
+      color: root.backgroundColor
 
       Flickable {
         id: detailFlick
         anchors.fill: parent
-        anchors.margins: Style.space(12)
+        anchors.margins: Style.space(22)
         contentWidth: width
         contentHeight: detailColumn.implicitHeight
         clip: true
@@ -327,17 +515,19 @@ Item {
         Column {
           id: detailColumn
           width: detailFlick.width
-          spacing: Style.space(8)
+          spacing: Style.space(14)
 
-          Row {
-            width: parent.width
-            spacing: Style.space(8)
+          Rectangle {
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Style.space(72)
+            height: width
+            radius: width / 2
+            color: Style.selectedFillFor(root.textColor, root.accentColor)
 
             Text {
-              width: parent.width
-              wrapMode: Text.WordWrap
+              anchors.centerIn: parent
               textFormat: Text.PlainText
-              text: root.contact ? String(root.contact.name || "") : ""
+              text: root.initials(root.contact ? root.contact.name : "")
               color: root.textColor
               font.family: root.panelFontFamily
               font.pixelSize: Style.font.title
@@ -345,21 +535,49 @@ Item {
             }
           }
 
+          Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            text: root.contact ? root.rowName(root.contact) : ""
+            color: root.textColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.title
+            font.bold: true
+          }
+
+          Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            text: root.selectedSourceName()
+            color: root.dimColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+          }
+
           Repeater {
-            model: root.contact ? [
-              { title: "Email", rows: root.contact.emails || [] },
-              { title: "Phone", rows: root.contact.phones || [] },
-              { title: "Address", rows: root.contact.addresses || [] }
-            ] : []
+            model: root.detailGroups
 
             delegate: Column {
+              id: detailSection
               required property var modelData
+              objectName: "contact-detail-section-" + String(modelData.key || "")
               width: detailColumn.width
-              spacing: Style.space(2)
+              spacing: Style.space(7)
               visible: modelData.rows.length > 0
 
+              Rectangle {
+                width: parent.width
+                height: 1
+                color: root.popupBorderColor
+                opacity: 0.65
+              }
+
               Text {
-                text: String(modelData.title)
+                textFormat: Text.PlainText
+                text: String(detailSection.modelData.title || "")
                 color: root.dimColor
                 font.family: root.panelFontFamily
                 font.pixelSize: Style.font.caption
@@ -367,51 +585,139 @@ Item {
               }
 
               Repeater {
-                model: modelData.rows
+                model: detailSection.modelData.rows
 
                 delegate: Row {
+                  id: detailRow
                   required property var modelData
                   width: detailColumn.width
-                  spacing: Style.space(6)
+                  spacing: Style.space(10)
 
                   Text {
+                    width: Math.min(Style.space(92), detailRow.width * 0.28)
+                    horizontalAlignment: Text.AlignRight
                     textFormat: Text.PlainText
-                    text: String(modelData.value || "")
-                    color: root.textColor
+                    text: String(detailRow.modelData.label || detailSection.modelData.fallback || "")
+                    color: root.dimColor
                     font.family: root.panelFontFamily
                     font.pixelSize: Style.font.bodySmall
                   }
 
                   Text {
-                    visible: String(modelData.label || "") !== ""
+                    width: detailRow.width - x
+                    wrapMode: Text.Wrap
                     textFormat: Text.PlainText
-                    text: String(modelData.label || "")
-                    color: root.dimColor
+                    text: String(detailRow.modelData.value || "")
+                    color: root.textColor
                     font.family: root.panelFontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.bodySmall
                   }
                 }
+              }
+            }
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(7)
+            visible: root.contact !== null
+
+            Rectangle {
+              width: parent.width
+              height: 1
+              color: root.popupBorderColor
+              opacity: 0.65
+            }
+
+            Text {
+              text: "Address Book"
+              textFormat: Text.PlainText
+              color: root.dimColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            Row {
+              width: parent.width
+              spacing: Style.space(10)
+
+              Text {
+                width: Math.min(Style.space(92), parent.width * 0.28)
+                horizontalAlignment: Text.AlignRight
+                text: "list"
+                textFormat: Text.PlainText
+                color: root.dimColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+
+              Text {
+                width: parent.width - x
+                text: root.selectedSourceName()
+                textFormat: Text.PlainText
+                color: root.textColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
               }
             }
           }
         }
       }
 
-      Text {
+      Column {
         anchors.centerIn: parent
-        visible: root.contact === null && !root.listVisible
-        text: "No contact open."
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
+        width: Math.min(parent.width - Style.space(40), Style.space(300))
+        spacing: Style.space(8)
+        visible: root.contact === null
+
+        Rectangle {
+          anchors.horizontalCenter: parent.horizontalCenter
+          width: Style.space(64)
+          height: width
+          radius: width / 2
+          color: Style.selectedFillFor(root.textColor, root.accentColor)
+
+          Text {
+            anchors.centerIn: parent
+            text: "?"
+            textFormat: Text.PlainText
+            color: root.dimColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.title
+          }
+        }
+
+        Text {
+          width: parent.width
+          horizontalAlignment: Text.AlignHCenter
+          text: "Select a contact"
+          textFormat: Text.PlainText
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          font.bold: true
+        }
+
+        Text {
+          width: parent.width
+          horizontalAlignment: Text.AlignHCenter
+          wrapMode: Text.WordWrap
+          text: "Contact details appear here."
+          textFormat: Text.PlainText
+          color: root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+        }
       }
 
       Button {
         objectName: "contact-back"
-        anchors.right: parent.right
+        anchors.left: parent.left
         anchors.top: parent.top
         anchors.margins: Style.space(8)
-        visible: root.contact !== null
+        visible: root.narrow && root.contact !== null
         text: "Back"
         bordered: false
         fontSize: Style.font.caption
