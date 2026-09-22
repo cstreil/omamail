@@ -1,4 +1,5 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
+CARGO_TARGET_DIR ?= $(CURDIR)/target
 .DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
@@ -101,7 +102,7 @@ test: test-rust test-js test-shell test-qml
 test-local: test test-backend-process
 
 test-backend-process:
-	cargo build --locked --target-dir "$(CURDIR)/target" --bin omamail
+	cargo build --locked --target-dir "$(CARGO_TARGET_DIR)" --bin omamail
 	python3 tests/test_backend_process.py
 	python3 tests/test_agent_native_bridge.py
 
@@ -110,7 +111,7 @@ test-rust:
 	cargo test --locked --features integration-test-credentials
 
 backend:
-	cargo build --locked --release --target-dir "$(CURDIR)/target" --bin omamail
+	cargo build --locked --release --target-dir "$(CARGO_TARGET_DIR)" --bin omamail
 
 # The parsing, formatting, and decision rules live in plain JS precisely so
 # they can be tested without a compositor. These run anywhere node does.

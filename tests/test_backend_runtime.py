@@ -101,6 +101,18 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.manager.run("install-local")["state"], "error")
         self.assertEqual(installed.read_bytes(), previous)
 
+    def test_install_local_honors_external_cargo_target(self):
+        target = Path(self.tmp.name).resolve() / "machine-cache/target"
+        source = target / "release/omamail"
+        source.parent.mkdir(parents=True)
+        source.write_text("#!/bin/sh\nprintf 'omamail 0.8.2\\n'\n")
+        source.chmod(0o700)
+        with patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target)}, clear=True):
+            result = self.manager.run("install-local")
+        self.assertEqual(result["state"], "ready", result)
+        self.assertEqual(self.binary.read_bytes(), source.read_bytes())
+        self.assertFalse((self.root / "target").exists())
+
     def test_make_install_builds_and_installs_before_linking(self):
         shutil.copyfile(SOURCE.parent.parent / "Makefile", self.root / "Makefile")
         tools = self.root / "tools"
@@ -108,12 +120,13 @@ class RuntimeTests(unittest.TestCase):
         cargo = tools / "cargo"
         cargo.write_text(f"#!{sys.executable}\n" + '''import os, pathlib, sys
 root = pathlib.Path.cwd()
+target = pathlib.Path(os.environ.get('CARGO_TARGET_DIR', root / 'target'))
 args = sys.argv[1:]
 assert args[:3] == ['build', '--locked', '--release']
-assert args[args.index('--target-dir') + 1] == str(root / 'target')
+assert args[args.index('--target-dir') + 1] == str(target)
 assert args[args.index('--bin') + 1] == 'omamail'
 if os.environ.get('BUILD_FAIL'): sys.exit(1)
-binary = root / 'target/release/omamail'
+binary = target / 'release/omamail'
 binary.parent.mkdir(parents=True, exist_ok=True)
 binary.write_text("#!/bin/sh\\nprintf 'omamail 0.8.2\\\\n'\\n")
 binary.chmod(0o700)
@@ -131,7 +144,7 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         link.write_text(f'''#!/bin/sh
 set -eu
 test "$({self.binary} --version)" = 'omamail 0.8.2'
-cmp target/release/omamail {self.binary}
+cmp "$CARGO_TARGET_DIR/release/omamail" {self.binary}
 touch linked
 ''')
         env = dict(os.environ, PATH=str(tools) + os.pathsep + os.defpath,
