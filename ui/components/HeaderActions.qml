@@ -54,7 +54,8 @@ Row {
     accent: root.accentColor
     fontFamily: root.panelFontFamily
     fontSize: Style.font.caption
-    enabled: root.ready
+    enabled: root.ready && !!root.service && !!root.service.calendarController
+      && root.service.calendarController.writableSourceGroups.length > 0
     onClicked: root.createEventRequested()
   }
 

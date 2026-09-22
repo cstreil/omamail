@@ -63,6 +63,14 @@ Item {
       eventController.eventWriting = false
       eventController.createCalls = 0
       eventController.updateCalls = 0
+      eventController.accountId = ""
+      eventController.writableSourceGroups = [{
+        id:"google:me@example.com", providerLabel:"Google", accountLabel:"me@example.com",
+        calendars:[{id:"google:me@example.com",name:"me@example.com",colorKey:"accent"}]
+      }, {
+        id:"account:imap:bob@example.com", providerLabel:"CalDAV", accountLabel:"bob@example.com",
+        calendars:[{id:"caldav:bob-home",name:"Home",colorKey:"accent"}]
+      }]
       composer.close()
       composer.writePending = false
     }
@@ -103,6 +111,14 @@ Item {
       composer.close()
       compare(ended, 1, "closing says so")
       compare(eventController.composerHeld, false)
+    }
+
+    function test_read_only_account_calendars_do_not_open_an_unusable_create_form() {
+      eventController.writableSourceGroups = []
+      compare(composer.begin(), false)
+      compare(composer.opened, false)
+      compare(composer.beginWith({title:"Read-only suggestion"}), false)
+      compare(composer.opened, false)
     }
 
     function test_old_update_completion_does_not_close_a_new_create_form() {

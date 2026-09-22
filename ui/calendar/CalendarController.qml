@@ -23,6 +23,9 @@ Item {
   property double pendingRangeStart: 0
   property double pendingRangeEnd: 0
   property string refreshAccountId: ""
+  property int refreshGeneration: 0
+  property int activeGeneration: 0
+  property var activeSources: []
   // The scope an answer belongs to, which is not always the mailbox.
   //
   // The cache is keyed by it and an in-flight refresh is checked against it, so
@@ -66,8 +69,13 @@ Item {
   // is touched and carried to the writer that runs after it.
   property string writeUrl: ""
   property bool eventWriting: false
-  readonly property var availableSources: Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
-    sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
+  readonly property var availableSources: Sources.withAccountCalendars(
+    Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
+      sourceList, service ? service.accountSummaries : []),
+      service ? service.accountSummaries : []),
+    service && Array.isArray(service.accountCalendarSources)
+      ? service.accountCalendarSources : [],
+    service ? service.accountSummaries : [])
   readonly property bool unifiedCalendarView: !!service
     && service.unifiedCalendarView === true
   readonly property var contextSources: unifiedCalendarView
@@ -103,12 +111,16 @@ Item {
 
   // The calendars the scope would ask, as one string. Google and Microsoft
   // calendars arrive with their account's sign-in, after a view that was
-  // already open asked for its range; and an account poll rebuilds the
-  // summaries twice a cycle with no calendar having come or gone, which a
-  // string compares away where the array would not.
+  // already open asked for its range. Include authoritative display/rights
+  // metadata so a stable remote id cannot leave copied event labels stale;
+  // omit local color so changing it never triggers network work.
   readonly property string enabledSourceKey: contextSources.sources.filter(function(source) {
     return source && source.enabled
-  }).map(function(source) { return String(source.id || "") }).join("\n")
+  }).map(function(source) {
+    return [String(source.id || ""), String(source.name || ""),
+      source.readOnly === true ? "r" : "w", source.default === true ? "d" : "",
+      source.subscribed === true ? "s" : ""].join("\u0000")
+  }).join("\n")
   onEnabledSourceKeyChanged: reloadVisibleRange()
 
   // No `eventCache.loaded` guard, and it is not missing. `refresh` refuses on
@@ -155,6 +167,7 @@ Item {
   function refresh(startMs, endMs) {
     var requestedStart = Number(startMs) || 0
     var requestedEnd = Number(endMs) || 0
+    var intent = ++refreshGeneration
     if (loading) {
       pendingRangeStart = requestedStart
       pendingRangeEnd = requestedEnd
@@ -167,6 +180,7 @@ Item {
     if (!eventCache.loaded) return
     lastError = ""
     lastErrorKind = ""
+    activeGeneration = intent
     refreshAccountId = accountId
     refreshScope = calendarScope
     var effectiveSources = sourcesForAccount(refreshAccountId)
@@ -180,8 +194,13 @@ Item {
   }
 
   function sourcesForAccount(wantedAccountId) {
-    var available = Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
-      sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
+    var available = Sources.withAccountCalendars(
+      Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
+        sourceList, service ? service.accountSummaries : []),
+        service ? service.accountSummaries : []),
+      service && Array.isArray(service.accountCalendarSources)
+        ? service.accountCalendarSources : [],
+      service ? service.accountSummaries : [])
     return unifiedCalendarView ? available : Sources.forAccount(available, wantedAccountId)
   }
 
@@ -643,20 +662,47 @@ Item {
     })
   }
 
-  function replaceActiveSourceEvents(values) {
-    if (refreshScope !== calendarScope) return
-    var sourceId = activeSource ? String(activeSource.id || "") : ""
+  function replaceSourceEvents(sources, values) {
+    if (refreshScope !== calendarScope || activeGeneration !== refreshGeneration) return false
+    var byId = ({})
+    for (var s = 0; s < sources.length; s++)
+      byId[String(sources[s] && sources[s].id || "")] = sources[s]
     var next = events.filter(function(event) {
-      return String(event && event.sourceId || "") !== sourceId
+      return byId[String(event && event.sourceId || "")] === undefined
     })
     var additions = Array.isArray(values) ? values : []
     for (var i = 0; i < additions.length; i++) {
-      additions[i].sourceName = activeSource
-        ? String(activeSource.name || activeSource.id || "Calendar") : "Calendar"
-      next.push(additions[i])
+      var value = additions[i]
+      var source = value ? byId[String(value.sourceId || "")] : null
+      if (!source || String(value.id || "") === ""
+          || !value.start || typeof value.start.ms !== "number"
+          || !value.end || typeof value.end.ms !== "number") return false
+      var row = ({})
+      for (var key in value) row[key] = value[key]
+      row.sourceName = String(source.name || source.id || "Calendar")
+      next.push(row)
     }
     next.sort(Calendar.compareEvents)
     events = next
+    return true
+  }
+
+  function replaceActiveSourceEvents(values) {
+    return replaceSourceEvents(activeSource ? [activeSource] : [], values)
+  }
+
+  function abandonStaleRefresh() {
+    if (!loading) return
+    queue = []
+    activeSource = null
+    activeSources = []
+    loading = false
+    var nextStart = pendingRangeStart || rangeStart
+    var nextEnd = pendingRangeEnd || rangeEnd
+    pendingRangeStart = 0
+    pendingRangeEnd = 0
+    if (nextStart && nextEnd)
+      Qt.callLater(function() { root.refresh(nextStart, nextEnd) })
   }
 
   function failSource(reason, kind) {
@@ -668,8 +714,13 @@ Item {
   }
 
   function processNext() {
+    if (activeGeneration !== refreshGeneration) {
+      abandonStaleRefresh()
+      return
+    }
     if (queue.length === 0) {
       activeSource = null
+      activeSources = []
       loading = false
       var enabled = sourcesForAccount(refreshAccountId).sources.filter(function(source) {
         return source && source.enabled
@@ -692,19 +743,62 @@ Item {
     var pending = queue.slice()
     activeSource = pending.shift()
     queue = pending
-    if (activeSource.kind === "google") startGoogle()
+    activeSources = [activeSource]
+    if (activeSource.kind === "account") startAccountList()
+    else if (activeSource.kind === "google") startGoogle()
     else if (activeSource.kind === "microsoft") startGraph()
     else if (activeSource.kind === "caldav" || activeSource.kind === "icloud") startPasswordLookup()
     else failSource("The HEY CLI does not expose calendar events")
   }
 
+  function startAccountList() {
+    var owner = String(activeSource && activeSource.accountId || "")
+    var batch = [activeSource]
+    var remaining = []
+    for (var i = 0; i < queue.length; i++) {
+      var candidate = queue[i]
+      if (candidate && candidate.kind === "account"
+          && String(candidate.accountId || "") === owner) batch.push(candidate)
+      else remaining.push(candidate)
+    }
+    queue = remaining
+    activeSources = batch
+    var generation = activeGeneration
+    var scope = refreshScope
+    var ids = batch.map(function(source) { return String(source.id || "") })
+    if (!service || !service.backend) {
+      failSource("Account calendar request failed")
+      return
+    }
+    service.backend.call("calendar.events", {
+      accountId: owner, sources: ids, start: rangeStart, end: rangeEnd
+    }, function(result, error) {
+      if (generation !== root.refreshGeneration || scope !== root.calendarScope) {
+        root.abandonStaleRefresh()
+        return
+      }
+      if (error || !result || !Array.isArray(result.events)
+          || !root.replaceSourceEvents(batch, result.events)) {
+        root.failSource("Account calendar request failed", "account")
+        return
+      }
+      root.processNext()
+    })
+  }
+
   function startPasswordLookup() { startNativeList() }
 
   function startNativeList() {
+    var generation = activeGeneration
+    var scope = refreshScope
     var fields = { start: new Date(rangeStart).toISOString(), end: new Date(rangeEnd).toISOString() }
     if (activeSource.kind === "caldav" || activeSource.kind === "icloud")
       fields.body = Calendar.caldavReport(rangeStart, rangeEnd)
     nativeRequest(activeSource, "list", fields, function(result, error) {
+      if (generation !== root.refreshGeneration || scope !== root.calendarScope) {
+        root.abandonStaleRefresh()
+        return
+      }
       if (error) { root.failSource(error); return }
       var body = String(result && result.body || "")
       var values = []

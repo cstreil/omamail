@@ -137,8 +137,8 @@ Item {
                 width: parent.width
                 height: Style.space(18)
                 color: Qt.rgba(eventColor.r, eventColor.g, eventColor.b,
-                  String(modelData.uid || "") === root.selectedEventId ? 0.3 : 0.16)
-                border.width: String(modelData.uid || "") === root.selectedEventId ? 2 : 1
+                  Calendar.eventKey(modelData) === root.selectedEventId ? 0.3 : 0.16)
+                border.width: Calendar.eventKey(modelData) === root.selectedEventId ? 2 : 1
                 border.color: eventColor
                 clip: true
 
@@ -287,8 +287,8 @@ Item {
                 height: Calendar.eventHeight(modelData, dayColumn.modelData, timeline.hourHeight)
                 radius: Style.cornerRadius
                 color: Qt.rgba(eventColor.r, eventColor.g, eventColor.b,
-                  String(modelData.uid || "") === root.selectedEventId ? 0.3 : 0.17)
-                border.width: String(modelData.uid || "") === root.selectedEventId ? 2 : 1
+                  Calendar.eventKey(modelData) === root.selectedEventId ? 0.3 : 0.17)
+                border.width: Calendar.eventKey(modelData) === root.selectedEventId ? 2 : 1
                 border.color: eventColor
                 clip: true
 

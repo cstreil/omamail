@@ -91,6 +91,8 @@
     "contacts.sources",
     "contacts.list",
     "contacts.get",
+    "calendar.sources",
+    "calendar.events",
     "attachment.read",
     "attachment.store",
     "attachment.storeUpload",
@@ -847,13 +849,84 @@
       "equals": {
         "message": "contacts_not_supported"
       }
+    },
+    {
+      "name": "calendar sources require a registered account",
+      "method": "calendar.sources",
+      "params": {
+        "accountId": "absent@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "calendar_account_unknown"
+      }
+    },
+    {
+      "name": "calendar sources are empty without a JMAP account",
+      "method": "calendar.sources",
+      "params": {
+        "accountId": "contract@example.org"
+      },
+      "equals": {
+        "sources": []
+      },
+      "types": {
+        "sources": "array"
+      }
+    },
+    {
+      "name": "calendar events are empty without a JMAP account",
+      "method": "calendar.events",
+      "params": {
+        "accountId": "contract@example.org",
+        "sources": ["contract-calendar"],
+        "start": 0,
+        "end": 1000
+      },
+      "equals": {
+        "events": []
+      },
+      "types": {
+        "events": "array"
+      }
+    },
+    {
+      "name": "calendar events reject an invalid range",
+      "method": "calendar.events",
+      "params": {
+        "accountId": "contract@example.org",
+        "sources": ["contract-calendar"],
+        "start": 1000,
+        "end": 1000
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "calendar events reject unknown fields",
+      "method": "calendar.events",
+      "params": {
+        "accountId": "contract@example.org",
+        "sources": ["contract-calendar"],
+        "start": 0,
+        "end": 1000,
+        "unknown": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
     }
   ],
   "unreleased": {
     "methods": [
       "contacts.sources",
       "contacts.list",
-      "contacts.get"
+      "contacts.get",
+      "calendar.sources",
+      "calendar.events"
     ],
     "cases": [
       "account-scoped contact suggestions",
@@ -862,7 +935,12 @@
       "contact list is empty without a JMAP account",
       "contact list rejects unknown fields",
       "contact list rejects an oversized page",
-      "contact detail is unsupported without a JMAP account"
+      "contact detail is unsupported without a JMAP account",
+      "calendar sources require a registered account",
+      "calendar sources are empty without a JMAP account",
+      "calendar events are empty without a JMAP account",
+      "calendar events reject an invalid range",
+      "calendar events reject unknown fields"
     ]
   }
 }

@@ -88,6 +88,8 @@ pub const ALL: &[&str] = &[
     "contacts.sources",
     "contacts.list",
     "contacts.get",
+    "calendar.sources",
+    "calendar.events",
     "attachment.read",
     "attachment.store",
     "attachment.storeUpload",

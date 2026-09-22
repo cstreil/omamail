@@ -4,6 +4,7 @@ import qs.Commons
 import qs.Ui
 import "components"
 import "bar"
+import "calendar/Calendar.js" as Calendar
 
 // The bar's job is one number and one click. Everything the widget knows comes
 // from the shared service, which keeps running whether or not the window is
@@ -65,7 +66,7 @@ BarWidget {
     if (!bar || !bar.shell) return
     var event = eventData || ({})
     var payload = JSON.stringify({
-      view: "calendar", eventId: String(event.uid || ""),
+      view: "calendar", eventId: Calendar.eventKey(event),
       eventStart: event.start ? Number(event.start.ms) : 0
     })
     if (typeof bar.shell.summon === "function") bar.shell.summon("omamail", payload)

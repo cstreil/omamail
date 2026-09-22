@@ -112,6 +112,7 @@ Item {
   readonly property bool backendCanListContacts: backend.ready && backend.apiVersion >= 6
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
+  readonly property bool backendCanListAccountCalendars: backend.ready && backend.apiVersion >= 6
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
@@ -2527,6 +2528,16 @@ Item {
   }
 
   // ------------------------------------------------------------- instances
+
+  AccountCalendarDirectory {
+    id: accountCalendarDirectory
+    backend: root.backend
+    available: root.backendCanListAccountCalendars
+    accountSummaries: root.accountSummaries
+  }
+  readonly property var accountCalendarSources: accountCalendarDirectory.sources
+  readonly property bool accountCalendarSourcesBusy: accountCalendarDirectory.busy
+  readonly property string accountCalendarSourcesError: accountCalendarDirectory.error
 
   CalendarController {
     id: sharedCalendar

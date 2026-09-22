@@ -58,6 +58,8 @@ Rectangle {
   }
 
   function beginAt(startMs) {
+    var preferred = preferredCalendarId()
+    if (preferred === "") return false
     var requested = Number(startMs)
     var start = isFinite(requested) && requested > 0
       ? new Date(requested) : new Date(Date.now() + 3600000)
@@ -83,9 +85,10 @@ Rectangle {
     // the stored accounts in their own order, so "Create event..." from mailbox
     // B would otherwise open with A's calendar chosen and write there unless
     // the user noticed the picker.
-    selectedSourceId = preferredCalendarId()
+    selectedSourceId = preferred
     opened = true
     Qt.callLater(titleField.forceActiveFocus)
+    return true
   }
 
   function preferredCalendarId() {
@@ -130,7 +133,7 @@ Rectangle {
     Qt.callLater(titleField.forceActiveFocus)
   }
 
-  function begin() { beginAt(0) }
+  function begin() { return beginAt(0) }
 
   // What the form holds, for a test to read without reaching into fields.
   function titleText() { return String(titleField.text || "") }
@@ -145,7 +148,7 @@ Rectangle {
     var fields = prefill || {}
     // A form the owner is in the middle of is not replaced.
     if (opened && !pristine) return false
-    beginAt(Number(fields.startMs) || 0)
+    if (!beginAt(Number(fields.startMs) || 0)) return false
     var start = Number(fields.startMs) || 0
     var end = Number(fields.endMs) || 0
     if (start > 0 && end > start) endField.text = localTime(new Date(end))

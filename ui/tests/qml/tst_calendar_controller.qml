@@ -14,6 +14,9 @@ Item {
     property var nextError: null
     property bool backendCanDiscoverCalendars: true
     property var discoveryCallback: null
+    property var calendarEventsCallback: null
+    property bool delayCalendarEvents: false
+    property var accountCalendarSources: []
     property var credentialWrites: []
     property var configWrites: []
     property var configCallback: null
@@ -21,6 +24,10 @@ Item {
       mailService.requests.push({ method: method, params: params })
       if (method === "calendar.discover") {
         mailService.discoveryCallback = callback
+        return
+      }
+      if (method === "calendar.events" && mailService.delayCalendarEvents) {
+        mailService.calendarEventsCallback = callback
         return
       }
       callback(mailService.nextResult, mailService.nextError)
@@ -80,6 +87,9 @@ Item {
       mailService.nextError = null
       mailService.backendCanDiscoverCalendars = true
       mailService.discoveryCallback = null
+      mailService.calendarEventsCallback = null
+      mailService.delayCalendarEvents = false
+      mailService.accountCalendarSources = []
       mailService.backend.ready = false
       mailService.accountSummaries = [
         { id: "imap:work@example.com", email: "work@example.com",
@@ -331,6 +341,98 @@ Item {
 
     function sourceIds(list) {
       return list.sources.map(function(source) { return source.id })
+    }
+
+    function cacheObject() {
+      for (var i = 0; i < controller.children.length; i++) {
+        if (controller.children[i].cacheName !== undefined) return controller.children[i]
+      }
+      return null
+    }
+
+    function prepareAccountCalendars() {
+      mailService.accountSummaries = [{id:"jmap:me@example.com", email:"me@example.com",
+        provider:"jmap", signedIn:true}]
+      mailService.accountCalendarSources = [
+        {id:"account:one", kind:"account", accountId:"jmap:me@example.com",
+          name:"Personal", enabled:true, readOnly:true},
+        {id:"account:two", kind:"account", accountId:"jmap:me@example.com",
+          name:"Family", enabled:true, readOnly:true}
+      ]
+      controller.sourceList = ({version:1, sources:[]})
+      controller.accountId = "jmap:me@example.com"
+      var cache = cacheObject()
+      verify(cache !== null)
+      cache.loaded = true
+      return cache
+    }
+
+    function test_account_calendars_use_one_protocol_neutral_range_request() {
+      var cache = prepareAccountCalendars()
+      mailService.requests = []
+      mailService.nextResult = ({events:[{
+        id:"event:one", sourceId:"account:one", uid:"uid-one", summary:"Meeting",
+        start:{ms:2000, allDay:false, tzid:"Etc/UTC", resolved:true},
+        end:{ms:3000, allDay:false, tzid:"Etc/UTC", resolved:true}
+      }]})
+      controller.refresh(1000, 5000)
+      compare(mailService.requests.length, 1)
+      compare(mailService.requests[0].method, "calendar.events")
+      compare(JSON.stringify(mailService.requests[0].params), JSON.stringify({
+        accountId:"jmap:me@example.com", sources:["account:one", "account:two"],
+        start:1000, end:5000
+      }))
+      verify(mailService.requests[0].params.token === undefined)
+      verify(mailService.requests[0].params.session === undefined)
+      compare(controller.events.length, 1)
+      compare(controller.events[0].sourceName, "Personal")
+      compare(controller.loading, false)
+      cache.loaded = false
+    }
+
+    function test_account_calendar_metadata_change_reloads_visible_range() {
+      var cache = prepareAccountCalendars()
+      controller.rangeStart = 1000
+      controller.rangeEnd = 5000
+      controller.loading = true
+      var changed = JSON.parse(JSON.stringify(mailService.accountCalendarSources))
+      changed[0].name = "Renamed"
+      mailService.accountCalendarSources = changed
+      compare(controller.pendingRangeStart, 1000)
+      compare(controller.pendingRangeEnd, 5000)
+      cache.loaded = false
+    }
+
+    function test_a_superseded_account_range_reply_cannot_replace_or_cache_events() {
+      var cache = prepareAccountCalendars()
+      mailService.requests = []
+      mailService.delayCalendarEvents = true
+      controller.refresh(1000, 5000)
+      compare(mailService.requests.length, 1)
+      var stale = mailService.calendarEventsCallback
+      controller.refresh(6000, 10000)
+      stale({events:[{id:"stale",sourceId:"account:one",uid:"stale",
+        summary:"Stale",start:{ms:2000},end:{ms:3000}}]}, null)
+      wait(0)
+      compare(controller.events.length, 0)
+      compare(mailService.requests.length, 2)
+      compare(mailService.requests[1].params.start, 6000)
+      mailService.calendarEventsCallback({events:[{id:"current",sourceId:"account:two",uid:"current",
+        summary:"Current",start:{ms:7000},end:{ms:8000}}]}, null)
+      compare(controller.events.length, 1)
+      compare(controller.events[0].id, "current")
+      cache.loaded = false
+    }
+
+    function test_account_calendar_errors_hide_backend_diagnostics() {
+      var cache = prepareAccountCalendars()
+      mailService.nextResult = null
+      mailService.nextError = ({code:-32000, message:"private event and server diagnostic"})
+      controller.refresh(1000, 5000)
+      compare(controller.events.length, 0)
+      compare(controller.lastError, "Personal · me@example.com: Account calendar request failed")
+      verify(controller.lastError.indexOf("private") < 0)
+      cache.loaded = false
     }
 
     function test_calendar_follows_the_active_mailbox_by_default() {

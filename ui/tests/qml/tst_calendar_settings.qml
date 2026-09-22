@@ -186,6 +186,32 @@ Item {
       compare(calendarController.removedId, "icloud:orphan")
     }
 
+    function test_account_calendar_is_read_only_and_locally_customizable() {
+      mailService.accountSummaries = [{id:"jmap:me@example.com", email:"me@example.com",
+        provider:"jmap", calendarProvider:"", signedIn:true}]
+      calendarController.sourceList = ({version:1, sources:[{
+        id:"account:opaque", kind:"account", name:"Personal",
+        accountId:"jmap:me@example.com", enabled:true, readOnly:true,
+        discovered:true, colorKey:"accent"
+      }]})
+      wait(1)
+      var detail = findChild(settings, "calendar-source-detail")
+      verify(detail !== null)
+      compare(detail.text, "Account · me@example.com · Read-only")
+      var remove = findChild(settings, "calendar-source-remove")
+      verify(remove !== null)
+      compare(remove.visible, false)
+      var toggle = findChild(settings, "calendar-source-toggle")
+      toggle.toggled()
+      compare(calendarController.toggledId, "account:opaque")
+      var color = findChild(settings, "calendar-source-color")
+      color.clicked()
+      var blue = findChild(settings, "calendar-color-blue")
+      blue.clicked()
+      compare(calendarController.coloredId, "account:opaque")
+      compare(calendarController.selectedColor, "blue")
+    }
+
     function test_old_backend_does_not_offer_discovery() {
       mailService.accountSummaries = [{ id: "imap:person@icloud.com",
         email: "person@icloud.com", calendarProvider: "icloud", signedIn: true }]

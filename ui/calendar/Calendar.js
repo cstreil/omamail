@@ -2,6 +2,19 @@
 
 .import "../message/Calendar.js" as Ics
 
+// A server object id is preferred when the backend owns one. Legacy provider
+// projections only expose an interoperability uid, which is not unique across
+// calendars or recurrence instances, so source and occurrence time complete
+// the UI identity without changing write semantics.
+function eventKey(event) {
+  var value = event || {}
+  var id = String(value.id || "")
+  if (id !== "") return "id:" + id
+  var start = value.start ? Number(value.start.ms) || 0 : 0
+  return "legacy:" + String(value.sourceId || "") + "\n"
+    + String(value.uid || "") + "\n" + start
+}
+
 function googleResponseError(status, responseText) {
   var payload = null
   try { payload = JSON.parse(String(responseText || "")) } catch (e) {}

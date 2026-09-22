@@ -156,7 +156,7 @@ function storageSnapshot(directory = process.env.HOME) {
     if (emptyRegistry) fs.writeFileSync(registryPath, JSON.stringify({version:1,accounts:[]}));
     // The full isolated HOME includes seeded cache/config/state sentinels,
     // credential helper effects and any newly created outbox/draft files.
-    const noWrites = fixture.method.startsWith('mail.') || fixture.name === 'recovery rejects invalid edit history';
+    const noWrites = fixture.method.startsWith('mail.') || fixture.method.startsWith('calendar.') || fixture.name === 'recovery rejects invalid edit history';
     const before = noWrites ? storageSnapshot() : null;
     const value = await call(fixture.method, fixture.params, fixture.errorCode === undefined ? null : fixture.errorCode);
     if (noWrites) assert.deepEqual(storageSnapshot(), before, fixture.name + ': no storage or credential effects');

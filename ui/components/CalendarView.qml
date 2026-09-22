@@ -21,6 +21,7 @@ Item {
   property date visibleWeek: new Date()
   property string viewMode: "month"
   property string selectedEventId: ""
+  property string pendingEventId: ""
   property var detailEvent: null
   readonly property bool detailOpen: detailEvent !== null
   readonly property var days: Calendar.monthDays(
@@ -62,6 +63,34 @@ Item {
     function onSourcesLoadedChanged() {
       if (root.controller && root.controller.sourcesLoaded) root.refresh()
     }
+    function onEventsChanged() { root.reconcileSelection(false) }
+    function onLoadingChanged() {
+      if (!root.controller || root.controller.loading
+          || Number(root.controller.pendingRangeStart || 0) > 0) return
+      Qt.callLater(function() { root.reconcileSelection(true) })
+    }
+  }
+
+  function reconcileSelection(finalizePending) {
+    var values = controller && Array.isArray(controller.events) ? controller.events : []
+    var detailKey = detailEvent ? Calendar.eventKey(detailEvent) : ""
+    var wanted = pendingEventId || selectedEventId
+    var selectedFound = wanted === ""
+    var detailFound = detailKey === ""
+    for (var i = 0; i < values.length; i++) {
+      var key = Calendar.eventKey(values[i])
+      if (key === wanted) {
+        selectedEventId = key
+        pendingEventId = ""
+        selectedFound = true
+      }
+      if (key === detailKey) { detailEvent = values[i]; detailFound = true }
+    }
+    if (!selectedFound && (pendingEventId === "" || finalizePending === true)) {
+      selectedEventId = ""
+      pendingEventId = ""
+    }
+    if (!detailFound) detailEvent = null
   }
 
   function visibleEvents() {
@@ -81,16 +110,16 @@ Item {
     if (values.length === 0) { selectedEventId = ""; return }
     var index = -1
     for (var i = 0; i < values.length; i++) {
-      if (String(values[i].uid || "") === selectedEventId) { index = i; break }
+      if (Calendar.eventKey(values[i]) === selectedEventId) { index = i; break }
     }
     if (index < 0) index = Number(offset) < 0 ? values.length : -1
     index = Math.max(0, Math.min(values.length - 1, index + Number(offset)))
-    selectedEventId = String(values[index].uid || "")
+    selectedEventId = Calendar.eventKey(values[index])
   }
 
   function activateEvent(event) {
     if (!event) return
-    selectedEventId = String(event.uid || "")
+    selectedEventId = Calendar.eventKey(event)
     detailEvent = event
   }
 
@@ -99,7 +128,7 @@ Item {
   function activateSelection() {
     var values = visibleEvents()
     for (var i = 0; i < values.length; i++) {
-      if (String(values[i].uid || "") === selectedEventId) {
+      if (Calendar.eventKey(values[i]) === selectedEventId) {
         activateEvent(values[i])
         return
       }
@@ -139,7 +168,8 @@ Item {
   }
 
   function showEvent(eventId, startMs) {
-    selectedEventId = String(eventId || "")
+    pendingEventId = String(eventId || "")
+    selectedEventId = pendingEventId
     viewMode = "month"
     if (Number(startMs) > 0) {
       var date = new Date(Number(startMs))
@@ -427,8 +457,8 @@ Item {
                 height: Style.space(18)
                 radius: 0
                 color: Qt.rgba(eventColor.r, eventColor.g, eventColor.b,
-                  eventData && String(eventData.uid || "") === root.selectedEventId ? 0.28 : 0.15)
-                border.width: eventData && String(eventData.uid || "") === root.selectedEventId ? 2 : 1
+                  eventData && Calendar.eventKey(eventData) === root.selectedEventId ? 0.28 : 0.15)
+                border.width: eventData && Calendar.eventKey(eventData) === root.selectedEventId ? 2 : 1
                 border.color: eventColor
 
                 Rectangle {

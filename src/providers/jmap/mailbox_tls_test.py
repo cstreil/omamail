@@ -149,6 +149,36 @@ with contextlib.nullcontext(pathlib.Path(__file__).parent.parent / "testdata" / 
                         "contact-2":{"id":"contact-2","addressBookIds":{"book":True},"name":{"full":"Bob","components":[{"kind":"given","value":"Bob"},{"kind":"surname","value":"Example"}]},"emails":{"a":{"address":"bob@example.test","contexts":{"work":True}},"b":{"address":"BOB@example.test"}},"phones":{"p":{"number":"+49-000-000001","label":"mobile"}},"addresses":{"a":{"components":[{"kind":"street","value":"Example Street 1"},{"kind":"locality","value":"Example City"}]}}}
                     }
                     result={"list":[cards[v] for v in args.get("ids",[]) if v in cards],"state":"cards-1"}
+                elif method=="Calendar/get":
+                    if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:calendars"] or args.get("accountId")!="calendar-account": replies.append(["error",{"type":"accountNotFound"},id]);continue
+                    result={"list":[
+                        {"id":"hidden","name":"Hidden","isDefault":False,"isSubscribed":True,"isVisible":True,"myRights":{"mayReadItems":False}},
+                        {"id":"unsubscribed","name":"Shared","isDefault":False,"isSubscribed":False,"isVisible":True,"myRights":{"mayReadItems":True}},
+                        {"id":"main","name":"Personal","isDefault":True,"isSubscribed":True,"isVisible":True,"myRights":{"mayReadItems":True}}
+                    ],"state":"calendars-1"}
+                    if scenario=="calendar-source-duplicate": result["list"].append(dict(result["list"][-1]))
+                elif method=="CalendarEvent/query":
+                    valid=(body.get("using")==["urn:ietf:params:jmap:core","urn:ietf:params:jmap:calendars"] and args.get("accountId")=="calendar-account" and args.get("timeZone")=="Etc/UTC" and args.get("expandRecurrences") is True and "sort" not in args and "inCalendar" not in args.get("filter",{}) and isinstance(args.get("filter",{}).get("after"),str) and isinstance(args.get("filter",{}).get("before"),str))
+                    if not valid: replies.append(["error",{"type":"invalidArguments"},id]);continue
+                    all_ids=["calendar-event-1","calendar-event-2"]
+                    position=int(args.get("position",0));requested=max(0,int(args.get("limit",len(all_ids))))
+                    page=all_ids[position:position+min(requested,1)]
+                    if scenario=="calendar-query-stall" and position>0: page=[]
+                    if scenario=="calendar-query-duplicate" and position>0: page=["calendar-event-1"]
+                    reported_position=position+1 if scenario=="calendar-query-wrong-position" else position
+                    reported_total=10001 if scenario=="calendar-query-too-many" else len(all_ids)
+                    query_state="calendar-query-2" if scenario=="calendar-query-state-change" and position>0 else "calendar-query-1"
+                    result={"ids":page,"position":reported_position,"total":reported_total,"queryState":query_state,"canCalculateChanges":True}
+                elif method=="CalendarEvent/get":
+                    if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:calendars"] or args.get("accountId")!="calendar-account" or "utcStart" not in args.get("properties",[]): replies.append(["error",{"type":"invalidArguments"},id]);continue
+                    events={
+                        "calendar-event-1":{"id":"calendar-event-1","uid":"uid-1","title":"Native event","description":"Synthetic","location":"Older draft room","locations":{"room":{"name":"Room 1"}},"participants":{"owner":{"email":"owner@example.test","roles":{"owner":True}},"guest":{"email":"guest@example.test"}},"status":"confirmed","calendarIds":{"main":True},"showWithoutTime":False,"timeZone":"Europe/Berlin","utcStart":"2026-09-22T08:00:00Z","utcEnd":"2026-09-22T09:00:00Z"},
+                        "calendar-event-2":{"id":"calendar-event-2","uid":"uid-2","title":"All day","description":"","calendarIds":{"main":True},"showWithoutTime":True,"timeZone":"Etc/UTC","start":"2026-09-23T00:00:00","duration":"P1D","utcStart":"2026-09-23T00:00:00Z","utcEnd":"2026-09-24T00:00:00Z"}
+                    }
+                    result={"list":[events[v] for v in args.get("ids",[]) if v in events],"state":"events-1"}
+                    if scenario=="calendar-get-unsolicited": result["list"].append(dict(events["calendar-event-1"],id="unrequested"))
+                    if scenario=="calendar-get-missing": result["list"]=[]
+                    if scenario=="calendar-get-duplicate" and result["list"]: result["list"].append(result["list"][0])
                 else: replies.append(["error",{"type":"unknownMethod"},id]);continue
                 replies.append([method,result,id])
             self.answer({"methodResponses":None if scenario=="bad-envelope" else replies,"sessionState":"s1"})

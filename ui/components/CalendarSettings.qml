@@ -59,7 +59,8 @@ Column {
     var value = source || {}
     if (value.kind === "caldav") return String(value.url || "CalDAV")
     var provider = value.kind === "google" ? "Google"
-      : value.kind === "microsoft" ? "Microsoft" : "iCloud"
+      : value.kind === "microsoft" ? "Microsoft"
+      : value.kind === "account" ? "Account" : "iCloud"
     var account = root.accountLabel(value)
     var detail = root.orphaned(value) ? provider + " · Mailbox removed"
       : account === "" ? provider + " calendar" : provider + " · " + account
@@ -88,7 +89,7 @@ Column {
 
   Text {
     width: parent.width
-    text: "Google and Microsoft calendars follow their signed-in mailboxes. Find every Microsoft or iCloud calendar below, or connect another CalDAV calendar manually."
+    text: "Account calendars follow their signed-in mailboxes. Find every Microsoft or iCloud calendar below, or connect another CalDAV calendar manually."
     color: root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption

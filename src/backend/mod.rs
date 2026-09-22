@@ -1,3 +1,4 @@
+mod calendar;
 mod contacts;
 mod content;
 pub(crate) mod mail;
@@ -253,6 +254,9 @@ impl Session {
         }
         if method.starts_with("contacts.") {
             return Box::pin(contacts::call(self, method, params)).await;
+        }
+        if matches!(method, "calendar.sources" | "calendar.events") {
+            return Box::pin(calendar::call(self, method, params)).await;
         }
         if matches!(method, "public.image" | "public.unsubscribe") {
             let fields = params.as_object().ok_or("invalid_params")?;

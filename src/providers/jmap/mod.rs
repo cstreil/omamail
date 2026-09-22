@@ -9,6 +9,7 @@ use tokio::{
     task::JoinHandle,
 };
 
+mod calendar;
 mod check;
 mod contacts;
 mod discovery;

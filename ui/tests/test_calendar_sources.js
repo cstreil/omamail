@@ -161,6 +161,58 @@ assert.strictEqual(sources.calendarEditorUrl({ sources: [{
   kind: "google", enabled: true, accountId: "me@gmail.com"
 }] }), "https://calendar.google.com/calendar/u/0/r/eventedit")
 
+// Backend-managed account calendars are a protocol-neutral projection. Saved
+// rows are preference overlays only: remote names and rights stay authoritative.
+{
+  const accounts = [
+    { id: "jmap:me@example.com", email: "me@example.com", provider: "jmap", signedIn: true },
+    { id: "jmap:other@example.com", email: "other@example.com", provider: "jmap", signedIn: true }
+  ]
+  const remote = [
+    { id: "account:opaque-personal", kind: "account", accountId: "jmap:me@example.com",
+      name: "Personal", enabled: true, default: true, subscribed: true, readOnly: true },
+    { id: "account:opaque-team", kind: "account", accountId: "jmap:me@example.com",
+      name: "Team", enabled: false, default: false, subscribed: true, readOnly: true },
+    { id: "account:opaque-other", kind: "account", accountId: "jmap:other@example.com",
+      name: "Other", enabled: true, default: true, subscribed: true, readOnly: true }
+  ]
+  let saved = sources.add(sources.emptyList(), {
+    id: "account:opaque-personal", kind: "account", accountId: "jmap:me@example.com",
+    name: "Stale name", enabled: false, colorKey: "cyan", readOnly: false
+  })
+  const available = sources.withAccountCalendars(saved, remote, accounts)
+  assert.strictEqual(available.sources.length, 3)
+  assert.strictEqual(available.sources[0].name, "Personal", "remote metadata stays authoritative")
+  assert.strictEqual(available.sources[0].enabled, false, "saved visibility overlays the remote default")
+  assert.strictEqual(available.sources[0].colorKey, "cyan")
+  assert.strictEqual(available.sources[0].readOnly, true, "the first slice cannot become writable through saved data")
+  assert.strictEqual(available.sources[0].default, true)
+  assert.strictEqual(available.sources[0].subscribed, true)
+  assert.strictEqual(sources.writable(available.sources[0]), false)
+  assert.strictEqual(sources.forAccount(available, "jmap:me@example.com").sources.length, 2)
+  assert.strictEqual(sources.providerLabel("account"), "Account")
+
+  let legacyDav = sources.add(sources.emptyList(), {
+    id: "caldav:personal", kind: "caldav", name: "Personal",
+    url: "https://calendar.example/personal/", username: "me@example.com", enabled: true
+  })
+  assert.strictEqual(sources.withAccountCalendars(legacyDav, remote, accounts).sources.length, 2,
+    "a legacy CalDAV username claim suppresses that account's projected calendars")
+  let explicitDav = sources.add(sources.emptyList(), {
+    id: "caldav:owned", kind: "caldav", name: "Owned",
+    url: "https://calendar.example/owned/", username: "shared-login",
+    accountId: "jmap:me@example.com", enabled: true
+  })
+  assert.strictEqual(sources.withAccountCalendars(explicitDav, remote, accounts).sources.length, 2,
+    "an explicit CalDAV account claim suppresses that account's projected calendars")
+  let unrelatedDav = sources.add(sources.emptyList(), {
+    id: "caldav:unrelated", kind: "caldav", name: "Personal",
+    url: "https://calendar.example/unrelated/", username: "cal-user", enabled: true
+  })
+  assert.strictEqual(sources.withAccountCalendars(unrelatedDav, remote, accounts).sources.length, 4,
+    "name equality alone must never suppress an account calendar")
+}
+
 console.log("test_calendar_sources.js ok")
 
 assert.strictEqual(sources.sameUrl("https://CALDAV.ICLOUD.COM/Work/", "https://caldav.icloud.com/Work"), true)

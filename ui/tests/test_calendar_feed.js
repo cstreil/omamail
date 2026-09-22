@@ -29,6 +29,16 @@ assert.strictEqual(feed.googleResponseError(500, "not json"),
   "Google Calendar returned HTTP 500")
 assert.strictEqual(feed.nativeRequestError("google"),
   "Google calendar request failed. Sign in again and check Calendar access")
+assert.strictEqual(feed.eventKey({id:"opaque-event", sourceId:"account:one", uid:"shared"}),
+  "id:opaque-event")
+assert.notStrictEqual(
+  feed.eventKey({sourceId:"calendar:a",uid:"shared",start:{ms:1000}}),
+  feed.eventKey({sourceId:"calendar:b",uid:"shared",start:{ms:1000}}),
+  "the same interoperability uid in two calendars is not one UI row")
+assert.notStrictEqual(
+  feed.eventKey({sourceId:"calendar:a",uid:"series",start:{ms:1000}}),
+  feed.eventKey({sourceId:"calendar:a",uid:"series",start:{ms:2000}}),
+  "recurrence occurrences are independently selectable")
 
 const week = feed.weekDays(new Date(2026, 7, 23).getTime(), 1)
 assert.strictEqual(week.length, 7)

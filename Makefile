@@ -72,7 +72,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/ConfirmDeleteDialog.qml \
 	ui/components/SetupPage.qml \
 	ui/components/ShortcutHelp.qml \
-	ui/calendar/CalendarController.qml ui/calendar/CalendarCache.qml \
+	ui/calendar/CalendarController.qml ui/calendar/CalendarCache.qml ui/calendar/AccountCalendarDirectory.qml \
 	ui/contacts/ContactDirectory.qml \
 	ui/components/CalendarView.qml \
 	ui/components/WeekCalendarView.qml \

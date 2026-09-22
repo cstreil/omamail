@@ -102,11 +102,30 @@ Still open in this slice:
 
 ### 4. JMAP calendars
 
-1. Project `Calendar/get` results into the existing calendar source model.
-2. Adapt `CalendarEvent/query`, `get` and `set` to the shared event projection.
-3. Keep JSCalendar recurrence, time-zone and scheduling semantics in Rust.
-4. Prefer JMAP automatically for a signed-in JMAP account that advertises the
-   calendar capability; retain existing providers and manual DAV sources.
+The first read-only API-6 slice is implemented:
+
+1. `Calendar/get` is projected into the existing calendar source model through
+   `calendar.sources`; only readable default or subscribed calendars are shown.
+2. `calendar.events` performs a bounded expanded `CalendarEvent/query` and
+   separate `get`. Timed events retain exact UTC instants; all-day events become
+   local civil-midnight boundaries so a date occupies exactly that date in the
+   existing UI model, including clock-change days. Raw JSCalendar, capability
+   names and state tokens do not cross into QML.
+3. Sources and events are read-only. `CalendarEvent/set`, local mutation queues
+   and conflict handling remain a later slice.
+4. A configured CalDAV source that explicitly claims an account (or whose
+   legacy username matches its email address) wins for that whole account.
+   There is no standard Calendar-id-to-CalDAV-URL mapping; this conservative
+   rule prevents duplicates without guessing from names or event UIDs. A future
+   explicit transport mapping can replace the account-level fallback.
+5. Recurrence expansion and timed-event zone resolution are requested from the
+   JMAP server in UTC and validated in Rust. The UI receives only resolved
+   instants and civil-day boundaries.
+6. Stalwart does not reliably implement the draft's per-calendar query filter,
+   so one bounded account-wide query is post-filtered against the authorized,
+   selected calendar ids. Unselected rows can consume the explicit 10,000-event
+   safety budget; the request fails closed rather than silently truncating.
+   Existing Google, Microsoft, iCloud and manual DAV providers remain available.
 
 ## Backend boundary
 
@@ -138,10 +157,22 @@ Not implemented yet; these need their own revision and a real consumer:
 - `contacts.delete`: destroy with the last known JMAP state
 - `contacts.sync`: request bounded incremental synchronization
 
+The same API 6 revision adds the read-only calendar projection:
+
+- `calendar.sources`: `{"accountId"}` ->
+  `{sources:[{id,accountId,kind,name,enabled,default,subscribed,readOnly}]}`;
+  `id` is a versioned opaque composite owned by the backend, and `kind` is the
+  protocol-neutral value `account`
+- `calendar.events`: `{"accountId","sources":[...],"start","end"}` ->
+  `{events:[...]}`; `start` and `end` are epoch milliseconds for a non-empty,
+  half-open range of at most 366 days, with at most 256 unique source ids
+- non-JMAP accounts and JMAP accounts without the calendar capability return
+  empty arrays, while unknown accounts and sources retain stable distinct errors
+
 JMAP-specific method names, `using` capabilities, request batching, state tokens
-and raw ContactCard values remain implementation details below this boundary.
-The source registry, credentials, cache and pending conflict state are backend
-concerns. QML owns navigation, selection, forms and validation feedback.
+and raw ContactCard/JSCalendar values remain implementation details below this
+boundary. The source registry, credentials, cache and pending conflict state are
+backend concerns. QML owns navigation, selection, forms and validation feedback.
 
 ## Contact projection
 

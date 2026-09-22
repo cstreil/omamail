@@ -3,7 +3,7 @@
 .import "Palette.js" as Palette
 
 var VERSION = 1
-var KINDS = ["caldav", "google", "microsoft", "icloud", "hey"]
+var KINDS = ["caldav", "google", "microsoft", "icloud", "hey", "account"]
 var COLOR_KEYS = Palette.keys()
 
 function defaultColorKey(identity) { return Palette.defaultKey(identity) }
@@ -45,6 +45,7 @@ function makeSource(raw) {
     accountId: trimmed(value.accountId), enabled: value.enabled !== false,
     calendarId: trimmed(value.calendarId),
     readOnly: value.readOnly === true, discovered: value.discovered === true,
+    default: value.default === true, subscribed: value.subscribed === true,
     colorKey: colorKey
   }
 }
@@ -226,9 +227,63 @@ function withMicrosoftAccounts(list, accountSummaries) {
   return next
 }
 
+// Merge the backend's protocol-neutral account-calendar projection with local
+// preferences. A configured CalDAV source claiming the same mailbox wins for
+// the whole account: there is no standards-defined CalDAV collection ↔ JMAP
+// Calendar identity, and guessing from a name or event uid would hide valid
+// shared/copied events. The conservative account-level rule avoids drawing the
+// same server data twice until an explicit transport mapping exists.
+function withAccountCalendars(list, projected, accountSummaries) {
+  var current = list && Array.isArray(list.sources) ? list.sources : []
+  var accounts = Array.isArray(accountSummaries) ? accountSummaries : []
+  var allowed = ({})
+  var emailOwners = ({})
+  for (var a = 0; a < accounts.length; a++) {
+    var account = accounts[a] || {}
+    var id = trimmed(account.id || account.email)
+    if (id === "" || account.provider !== "jmap" || account.signedIn !== true) continue
+    allowed[id] = true
+    var email = trimmed(account.email).toLowerCase()
+    if (email !== "") emailOwners[email] = id
+  }
+  var blocked = ({})
+  for (var c = 0; c < current.length; c++) {
+    var candidate = current[c] || {}
+    if (candidate.kind !== "caldav") continue
+    var owner = trimmed(candidate.accountId)
+    if (owner === "") owner = emailOwners[trimmed(candidate.username).toLowerCase()] || ""
+    if (owner !== "" && allowed[owner]) blocked[owner] = true
+  }
+  var next = emptyList()
+  for (var n = 0; n < current.length; n++) {
+    if (current[n] && current[n].kind !== "account") next = add(next, current[n])
+  }
+  var remote = Array.isArray(projected) ? projected : []
+  for (var r = 0; r < remote.length; r++) {
+    var value = remote[r] || {}
+    var accountId = trimmed(value.accountId)
+    var sourceId = trimmed(value.id)
+    if (sourceId === "" || !allowed[accountId] || blocked[accountId]) continue
+    var saved = null
+    for (var s = 0; s < current.length; s++) {
+      if (current[s] && current[s].kind === "account"
+          && trimmed(current[s].id) === sourceId) { saved = current[s]; break }
+    }
+    next = add(next, {
+      id: sourceId, kind: "account", name: value.name,
+      accountId: accountId,
+      enabled: saved ? saved.enabled !== false : value.enabled !== false,
+      readOnly: true, discovered: true,
+      default: value.default === true, subscribed: value.subscribed === true,
+      colorKey: saved ? saved.colorKey : Palette.defaultKey(sourceId)
+    })
+  }
+  return next
+}
+
 function comesWithAccount(source) {
   return !!source && (source.kind === "google" || source.kind === "microsoft"
-    || source.kind === "icloud")
+    || source.kind === "icloud" || source.kind === "account")
 }
 
 function accountSummary(accountId, accountSummaries) {
@@ -345,6 +400,7 @@ function providerLabel(kind) {
   if (value === "microsoft" || value === "outlook") return "Microsoft"
   if (value === "icloud") return "iCloud"
   if (value === "hey") return "HEY"
+  if (value === "account") return "Account"
   return "CalDAV"
 }
 
