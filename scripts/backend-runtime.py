@@ -287,9 +287,14 @@ def install(required, architecture):
             replace_runtime(candidate)
 
 
+def local_target_dir():
+    target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).expanduser()
+    return target if target.is_absolute() else ROOT / target
+
+
 def install_local(required):
     """Install an explicitly built checkout binary, without release downloads."""
-    source = ROOT / "target/release/omamail"
+    source = local_target_dir() / "release/omamail"
     safe_path(source)
     require(source.is_file(), "Build the local backend first with make backend.")
     with source.open("rb") as compiled:
