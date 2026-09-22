@@ -24,6 +24,8 @@ done
 
 [ -x scripts/link-plugin.sh ] || fail "scripts/link-plugin.sh must be executable"
 grep -q 'plugin-backups' scripts/link-plugin.sh || fail "backups must not land inside the plugins directory"
+grep -q 'omarchy-shell shell ping' scripts/link-plugin.sh \
+  || fail "a slow shell restart must be verified before plugin registration"
 
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT

@@ -64,7 +64,19 @@ fi
 
 if $restart_shell; then
   printf '%s\n' 'Restarting Omarchy shell…'
-  omarchy restart shell
+  if ! omarchy restart shell; then
+    # Some shells finish loading just after the restart command's short IPC
+    # deadline. Continue only when that same new shell becomes reachable.
+    ready=false
+    for _ in {1..100}; do
+      if OMARCHY_SHELL_IPC_TIMEOUT=0.5s omarchy-shell shell ping >/dev/null 2>&1; then
+        ready=true
+        break
+      fi
+      sleep 0.1
+    done
+    $ready || { printf '%s\n' 'Omarchy shell did not become ready.' >&2; exit 1; }
+  fi
 fi
 
 printf '%s\n' 'Registering Omamail in the bar…'
