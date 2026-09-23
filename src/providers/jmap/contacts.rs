@@ -1,4 +1,4 @@
-//! Read-only JMAP Contacts projection: recipient suggestions and address books.
+//! JMAP Contacts projection and staged internal create writer (no RPC dispatch).
 use super::{Session, mailbox};
 use serde_json::{Value, json};
 use std::{collections::HashSet, sync::Arc, time::Duration};
@@ -14,6 +14,10 @@ const MAX_ENTRIES_PER_CARD: usize = 64;
 const MAX_COMPONENTS: usize = 64;
 const MAX_TEXT: usize = 4096;
 const MAX_LABEL: usize = 64;
+const MAX_CREATE_NAME: usize = 255;
+const MAX_CREATE_EMAILS: usize = 8;
+const MAX_CREATE_EMAIL: usize = 320;
+const MAX_CREATE_ID: usize = 255;
 const CARD_PROPERTIES: &[&str] = &["id", "addressBookIds", "name", "emails"];
 const DETAIL_PROPERTIES: &[&str] = &[
     "id",
@@ -131,6 +135,117 @@ impl Session {
         })
         .await
         .unwrap_or(Err("jmap_timeout"));
+        note(&context, &result);
+        result
+    }
+
+    /// Staged writer: intentionally NOT dispatched by backend methods or exposed
+    /// in API 6. Callers must eventually gate this on a released API revision.
+    /// An attempted set is never retried: absent or malformed acknowledgement
+    /// means delivery is unknown, not that the card was not created.
+    #[allow(dead_code)]
+    pub(crate) async fn contact_create_draft(
+        &self,
+        account_id: &str,
+        source: &str,
+        name: &str,
+        emails: &[String],
+    ) -> Result<Value, &'static str> {
+        // Validate every caller-controlled byte and generate a conforming UID
+        // before even resolving a session. A bad draft causes zero I/O.
+        let card = new_card(source, name, emails)?;
+        let (context, snapshot, account) = self.contacts_setup(account_id).await?;
+        if !valid_jmap_id(&account) {
+            return Err("jmap_invalid_response");
+        }
+        let mut submitted = false;
+        let result = tokio::time::timeout(CALL_TIME, async {
+            let books = self
+                .api_using(
+                    &context,
+                    &snapshot,
+                    json!([["AddressBook/get", {
+                    "accountId": account, "ids": [source], "properties": ["id", "myRights"]
+                }, "contacts-create-book"]]),
+                    json!([CORE, CONTACTS]),
+                )
+                .await?;
+            let book =
+                create_preflight_argument(&books, "contacts-create-book", "AddressBook/get")?;
+            if book["accountId"] != account
+                || book["list"].as_array().is_none()
+                || book["notFound"].as_array().is_none()
+            {
+                return Err("jmap_invalid_response");
+            }
+            if book["list"].as_array().is_some_and(|list| list.is_empty())
+                && book["notFound"] == json!([source])
+            {
+                return Err("contacts_source_not_writable");
+            }
+            if book["list"].as_array().is_none_or(|list| list.len() != 1)
+                || book["notFound"]
+                    .as_array()
+                    .is_none_or(|ids| !ids.is_empty())
+            {
+                return Err("jmap_invalid_response");
+            }
+            let selected = &book["list"][0];
+            if selected["id"] != source {
+                return Err("jmap_invalid_response");
+            }
+            if selected["myRights"]["mayRead"] != true || selected["myRights"]["mayWrite"] != true {
+                return Err("contacts_source_not_writable");
+            }
+
+            // RFC 8620 ifInState is a Foo/get state, NEVER queryState.
+            let get = self
+                .api_using(
+                    &context,
+                    &snapshot,
+                    json!([["ContactCard/get", {
+                    "accountId": account, "ids": [], "properties": ["id"]
+                }, "contacts-create-state"]]),
+                    json!([CORE, CONTACTS]),
+                )
+                .await?;
+            let cards =
+                create_preflight_argument(&get, "contacts-create-state", "ContactCard/get")?;
+            if cards["accountId"] != account
+                || cards["list"].as_array().is_none_or(|list| !list.is_empty())
+                || cards["notFound"]
+                    .as_array()
+                    .is_none_or(|ids| !ids.is_empty())
+            {
+                return Err("jmap_invalid_response");
+            }
+            let state = bounded_id(cards["state"].as_str().ok_or("jmap_invalid_response")?)?;
+            let call = json!([["ContactCard/set", {
+                "accountId": account, "ifInState": state,
+                "create": {"new": card}
+            }, "contacts-create-set"]]);
+            submitted = true;
+            let reply = self
+                .api_using(&context, &snapshot, call, json!([CORE, CONTACTS]))
+                .await
+                .map_err(|error| {
+                    if error == "jmap_unauthorized" {
+                        context
+                            .rejected
+                            .store(true, std::sync::atomic::Ordering::Release);
+                    }
+                    "contacts_delivery_unknown"
+                })?;
+            parse_create_reply(&reply, &account, state)
+        })
+        .await
+        .unwrap_or_else(|_| {
+            Err(if submitted {
+                "contacts_delivery_unknown"
+            } else {
+                "jmap_timeout"
+            })
+        });
         note(&context, &result);
         result
     }
@@ -321,6 +436,184 @@ impl Session {
         }
         Ok((cards, missing))
     }
+}
+
+fn create_preflight_argument<'a>(
+    reply: &'a Value,
+    tag: &str,
+    method: &str,
+) -> Result<&'a Value, &'static str> {
+    let responses = reply["methodResponses"]
+        .as_array()
+        .ok_or("jmap_invalid_response")?;
+    if responses.len() != 1
+        || responses[0].as_array().is_none_or(|item| item.len() != 3)
+        || responses[0][2] != tag
+    {
+        return Err("jmap_invalid_response");
+    }
+    mailbox::argument(reply, tag, method)
+}
+
+fn valid_jmap_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_CREATE_ID
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn new_card(source: &str, name: &str, emails: &[String]) -> Result<Value, &'static str> {
+    if !valid_jmap_id(source)
+        || name.is_empty()
+        || name.len() > MAX_CREATE_NAME
+        || name.trim() != name
+        || unsafe_text(name)
+        || emails.is_empty()
+        || emails.len() > MAX_CREATE_EMAILS
+    {
+        return Err("invalid_params");
+    }
+    let mut seen = HashSet::new();
+    let mut entries = serde_json::Map::new();
+    for (index, email) in emails.iter().enumerate() {
+        if !valid_create_email(email) || !seen.insert(email.to_ascii_lowercase()) {
+            return Err("invalid_params");
+        }
+        entries.insert(format!("e{}", index + 1), json!({"address": email}));
+    }
+    let mut books = serde_json::Map::new();
+    books.insert(source.to_owned(), json!(true));
+    Ok(json!({
+        "@type": "Card", "version": "1.0", "uid": new_uid()?,
+        "addressBookIds": books, "name": {"full": name}, "emails": entries
+    }))
+}
+
+fn unsafe_text(value: &str) -> bool {
+    value.chars().any(|character| {
+        character.is_control()
+            || matches!(character, '\u{061c}' | '\u{200e}' | '\u{200f}'
+            | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    })
+}
+
+// Deliberately narrow ASCII addr-spec subset; avoid accepting addresses that
+// the server may repair silently or interpreting caller input as raw JSContact.
+fn valid_create_email(value: &str) -> bool {
+    if value.len() > MAX_CREATE_EMAIL || value.is_empty() || !value.is_ascii() {
+        return false;
+    }
+    let Some((local, domain)) = value.split_once('@') else {
+        return false;
+    };
+    if local.is_empty()
+        || local.len() > 64
+        || domain.is_empty()
+        || domain.len() > 253
+        || local.starts_with('.')
+        || local.ends_with('.')
+        || local.contains("..")
+        || !local
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"!#$%&'*+-/=?^_`{|}~.".contains(&c))
+    {
+        return false;
+    }
+    let labels: Vec<_> = domain.split('.').collect();
+    labels.len() >= 2
+        && labels.iter().all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'-')
+        })
+        && labels
+            .last()
+            .is_some_and(|label| label.len() >= 2 && label.bytes().all(|c| c.is_ascii_alphabetic()))
+}
+
+fn new_uid() -> Result<String, &'static str> {
+    use std::fmt::Write;
+    let mut bytes = [0u8; 16];
+    rustls::crypto::ring::default_provider()
+        .secure_random
+        .fill(&mut bytes)
+        .map_err(|_| "contacts_random_unavailable")?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let mut uid = String::from("urn:uuid:");
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(index, 4 | 6 | 8 | 10) {
+            uid.push('-');
+        }
+        write!(&mut uid, "{byte:02x}").map_err(|_| "contacts_random_unavailable")?;
+    }
+    Ok(uid)
+}
+
+fn parse_create_reply(reply: &Value, account: &str, state: &str) -> Result<Value, &'static str> {
+    const UNKNOWN: &str = "contacts_delivery_unknown";
+    let responses = reply["methodResponses"].as_array().ok_or(UNKNOWN)?;
+    if responses.len() != 1 {
+        return Err(UNKNOWN);
+    }
+    let response = responses[0]
+        .as_array()
+        .filter(|item| item.len() == 3)
+        .ok_or(UNKNOWN)?;
+    if response[2] != "contacts-create-set" {
+        return Err(UNKNOWN);
+    }
+    if response[0] == "error" {
+        if response[1]["type"] == "stateMismatch" {
+            return Err("contacts_state_mismatch");
+        }
+        // A method-level error can be serverPartialFail: some changes may
+        // already have committed. Only a per-object notCreated proves this
+        // particular create was rejected; all other outcomes stay unknown.
+        return Err(UNKNOWN);
+    }
+    if response[0] != "ContactCard/set" {
+        return Err(UNKNOWN);
+    }
+    let result = &response[1];
+    if result["accountId"] != account
+        // RFC 8620 permits a null oldState even on a successful set.
+        || result.get("oldState").is_none_or(|old| old != state && !old.is_null())
+        || result["newState"]
+            .as_str()
+            .is_none_or(|value| bounded_id(value).is_err())
+    {
+        return Err(UNKNOWN);
+    }
+    let created = result["created"].as_object();
+    let rejected = result["notCreated"].as_object();
+    if created.is_some_and(|map| !map.is_empty()) && rejected.is_some_and(|map| !map.is_empty()) {
+        return Err(UNKNOWN);
+    }
+    if rejected.is_some_and(|map| map.len() == 1 && map.contains_key("new")) {
+        let kind = result["notCreated"]["new"]["type"]
+            .as_str()
+            .ok_or(UNKNOWN)?;
+        if kind.is_empty() || kind.len() > 128 || !kind.is_ascii() || unsafe_text(kind) {
+            return Err(UNKNOWN);
+        }
+        return Err("contacts_create_rejected");
+    }
+    if rejected.is_some_and(|map| !map.is_empty())
+        || created.is_none_or(|map| map.len() != 1 || !map.contains_key("new"))
+    {
+        return Err(UNKNOWN);
+    }
+    let id = result["created"]["new"]["id"].as_str().ok_or(UNKNOWN)?;
+    if !valid_jmap_id(id) {
+        return Err(UNKNOWN);
+    }
+    Ok(json!({"id": id}))
 }
 
 fn charge_json_bytes(used: &mut usize, value: &Value, limit: usize) -> Result<(), &'static str> {
@@ -881,6 +1174,39 @@ mod tests {
         fixture_session_for("default").await
     }
 
+    async fn fixture_report(session: &Session, account: &str) -> Vec<Value> {
+        let context = session.context(account).unwrap();
+        let snapshot = session.snapshot(account, &context).await.unwrap();
+        let url = snapshot.document["apiUrl"]
+            .as_str()
+            .unwrap()
+            .replace("/api", "/report");
+        let body = session
+            .client
+            .as_ref()
+            .unwrap()
+            .get(url)
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    fn draft_emails() -> Vec<String> {
+        vec!["one@example.test".into(), "two@example.test".into()]
+    }
+
+    fn reported_methods(report: &[Value]) -> Vec<&str> {
+        report
+            .iter()
+            .flat_map(|request| request["calls"].as_array().into_iter().flatten())
+            .filter_map(|call| call[0].as_str())
+            .collect()
+    }
+
     #[tokio::test]
     async fn rejects_inconsistent_or_nonprogressing_contact_query_pages() {
         for scenario in [
@@ -961,5 +1287,153 @@ mod tests {
                 .await
                 .is_err_and(|error| error == "contacts_not_found")
         );
+    }
+
+    #[tokio::test]
+    async fn create_draft_rejects_invalid_inputs_without_any_network() {
+        let (_peer, session, account) = fixture_session_for("contact-create-ok").await;
+        for (source, name, emails) in [
+            ("", "Synthetic Person", draft_emails()),
+            ("book\nother", "Synthetic Person", draft_emails()),
+            ("book/other", "Synthetic Person", draft_emails()),
+            ("böök", "Synthetic Person", draft_emails()),
+            ("book", " ", draft_emails()),
+            ("book", "A\nB", draft_emails()),
+            ("book", "Synthetic Person", vec![]),
+            ("book", "Synthetic Person", vec!["not-an-address".into()]),
+            (
+                "book",
+                "Synthetic Person",
+                vec!["a@example.test".into(), "A@example.test".into()],
+            ),
+            (
+                "book",
+                "Synthetic Person",
+                vec!["a@example.test".into(); MAX_CREATE_EMAILS + 1],
+            ),
+        ] {
+            assert_eq!(
+                session
+                    .contact_create_draft(&account, source, name, &emails)
+                    .await,
+                Err("invalid_params")
+            );
+        }
+        assert!(fixture_report(&session, &account).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn creates_exact_rfc9553_card_using_get_state_on_synthetic_tls_peer() {
+        let (_peer, session, account) = fixture_session_for("contact-create-ok").await;
+        let result = session
+            .contact_create_draft(&account, "book", "Synthetic Person", &draft_emails())
+            .await;
+        assert_eq!(result, Ok(json!({"id":"contact-created"})));
+        let report = fixture_report(&session, &account).await;
+        assert_eq!(
+            reported_methods(&report),
+            ["AddressBook/get", "ContactCard/get", "ContactCard/set"]
+        );
+        assert!(
+            report
+                .iter()
+                .all(|request| request["authorization"] == true)
+        );
+        assert!(
+            !json!(report).to_string().contains("synthetic-secret"),
+            "reports must not contain the fixture credential"
+        );
+    }
+
+    #[tokio::test]
+    async fn null_old_state_still_confirms_one_successfully_created_card() {
+        let (_peer, session, account) = fixture_session_for("contact-create-null-old-state").await;
+        assert_eq!(
+            session
+                .contact_create_draft(&account, "book", "Synthetic Person", &draft_emails())
+                .await,
+            Ok(json!({"id":"contact-created"}))
+        );
+        let report = fixture_report(&session, &account).await;
+        assert_eq!(
+            reported_methods(&report),
+            ["AddressBook/get", "ContactCard/get", "ContactCard/set"]
+        );
+    }
+
+    #[tokio::test]
+    async fn denies_unwritable_source_before_reading_state_or_submitting() {
+        for scenario in [
+            "contact-create-denied",
+            "contact-create-unreadable",
+            "contact-create-unknown-book",
+        ] {
+            let (_peer, session, account) = fixture_session_for(scenario).await;
+            assert_eq!(
+                session
+                    .contact_create_draft(&account, "book", "Synthetic Person", &draft_emails())
+                    .await,
+                Err("contacts_source_not_writable")
+            );
+            let report = fixture_report(&session, &account).await;
+            assert_eq!(reported_methods(&report), ["AddressBook/get"]);
+        }
+        let (_peer, session, account) =
+            fixture_session_for("contact-create-wrong-book-account").await;
+        assert_eq!(
+            session
+                .contact_create_draft(&account, "book", "Synthetic Person", &draft_emails())
+                .await,
+            Err("jmap_invalid_response")
+        );
+        let report = fixture_report(&session, &account).await;
+        assert_eq!(reported_methods(&report), ["AddressBook/get"]);
+    }
+
+    #[tokio::test]
+    async fn distinguish_state_mismatch_and_not_created_without_remote_descriptions() {
+        for (scenario, expected) in [
+            ("contact-create-state-mismatch", "contacts_state_mismatch"),
+            ("contact-create-not-created", "contacts_create_rejected"),
+        ] {
+            let (_peer, session, account) = fixture_session_for(scenario).await;
+            assert_eq!(
+                session
+                    .contact_create_draft(&account, "book", "Synthetic Person", &draft_emails())
+                    .await,
+                Err(expected)
+            );
+            let report = fixture_report(&session, &account).await;
+            assert_eq!(
+                reported_methods(&report),
+                ["AddressBook/get", "ContactCard/get", "ContactCard/set"]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn uncertain_set_delivery_is_never_retried_or_reported_as_not_created() {
+        for scenario in [
+            "contact-create-disconnect",
+            "contact-create-malformed",
+            "contact-create-bad-response",
+            "contact-create-bad-id",
+            "contact-create-server-partial-fail",
+        ] {
+            let (_peer, session, account) = fixture_session_for(scenario).await;
+            assert_eq!(
+                session
+                    .contact_create_draft(&account, "book", "Synthetic Person", &draft_emails())
+                    .await,
+                Err("contacts_delivery_unknown"),
+                "{scenario}"
+            );
+            let report = fixture_report(&session, &account).await;
+            assert_eq!(
+                reported_methods(&report),
+                ["AddressBook/get", "ContactCard/get", "ContactCard/set"],
+                "{scenario} must submit once and never retry"
+            );
+        }
     }
 }

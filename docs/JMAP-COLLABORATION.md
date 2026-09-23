@@ -171,6 +171,28 @@ success. Responses contain only stable product errors and a confirmed opaque
 created id, not server descriptions or credentials. Account/source switches may
 hide an old callback but must not pretend a sent mutation was cancelled.
 
+The future public request is `contacts.create({accountId, source, name, emails})`,
+with an explicit opaque address-book id and a small, validated list of email
+addresses; a successful response returns only `{id, source}`. Neither the name
+nor the addresses are accepted as a raw JSContact object. The service must have
+an **independent >=7 gate** (not the existing >=6 read gate) and offer creation
+only for the selected source when it is writable; the backend must recheck the
+exact book's current `mayRead` and `mayWrite` rights anyway. Obtain the state
+from `ContactCard/get` with `ids:[]` immediately before `ContactCard/set`:
+`AddressBook/get.state`, `ContactCard/query.queryState`, and cached states from
+unrelated requests are not the card collection's revision. Conflicts, definite
+per-object rejection and an unconfirmed delivery must have distinct static UI
+messages; an unconfirmed delivery asks for refresh/search rather than a blind
+retry. A source/account switch after submission may suppress a stale callback,
+not retroactively cancel the server write. When API 7 eventually exposes the
+method, its backend setup plus preflight/write deadline can exceed the current
+30-second generic QML RPC timeout; use a method-specific deadline or a single
+whole-operation bound so the UI does not time out before a definitive answer.
+
+An isolated internal writer and synthetic TLS fixtures can be reviewed before
+the API-6 publication, but they must remain unreachable from JSON-RPC, QML and
+the installed runtime. That preparatory code is **not** the API-7 feature.
+
 Updates and deletes follow separately: preserve unknown JSContact fields and
 entry ids with narrow patch semantics, carry a revision captured at read time,
 check fresh rights, present a genuine conflict for a changed state, and never
