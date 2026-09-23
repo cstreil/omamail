@@ -1,5 +1,8 @@
 # Omamail
 
+> [!WARNING]
+> **Highly experimental, unofficial personal fork — assume a fresh installation will not work.** JMAP contacts and calendars are read-only development features; contact creation is not exposed in the app. This fork has no published backend matching those features. Do not rely on this fork for production or irreplaceable data. The installation commands below still install the **original upstream Omamail**, not this fork. None of these changes have been merged upstream.
+
 Omamail is a native email and calendar app with multiple accounts and keyboard navigation. It runs either as an Omarchy shell plugin or as a standalone Qt desktop application.
 
 <img width="800" alt="Omamail — reading mail with AI assistance" src="docs/images/full-mail.webp" />
