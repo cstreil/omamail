@@ -198,6 +198,21 @@ assert.strictEqual(sources.calendarEditorUrl({ sources: [{
   })
   assert.strictEqual(sources.withAccountCalendars(legacyDav, remote, accounts).sources.length, 2,
     "a legacy CalDAV username claim suppresses that account's projected calendars")
+  const disabledDav = sources.setEnabled(legacyDav, "caldav:personal", false)
+  const switchedToJmap = sources.withAccountCalendars(disabledDav, remote, accounts)
+  assert.strictEqual(switchedToJmap.sources.length, 4,
+    "a disabled CalDAV transport remains configured without hiding JMAP calendars")
+  assert.strictEqual(switchedToJmap.sources[0].enabled, false,
+    "the old transport remains available for a reversible rollback")
+  assert.strictEqual(sources.writable(switchedToJmap.sources[0]), false,
+    "a disabled DAV source is never offered for writes")
+  assert.strictEqual(sources.writableGroups(sources.groupByAccount(switchedToJmap, accounts)).length,
+    0, "a JMAP read-only account cannot secretly create through its disabled DAV source")
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(switchedToJmap.sources.filter(s => s.kind === "account")
+    .map(s => s.accountId))), [accounts[0].id, accounts[0].id, accounts[1].id])
+  assert.strictEqual(sources.withAccountCalendars(
+    sources.setEnabled(disabledDav, "caldav:personal", true), remote, accounts).sources.length, 2,
+    "re-enabling CalDAV restores conservative account-level precedence")
   let explicitDav = sources.add(sources.emptyList(), {
     id: "caldav:owned", kind: "caldav", name: "Owned",
     url: "https://calendar.example/owned/", username: "shared-login",

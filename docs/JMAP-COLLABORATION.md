@@ -127,6 +127,59 @@ The first read-only API-6 slice is implemented:
    safety budget; the request fails closed rather than silently truncating.
    Existing Google, Microsoft, iCloud and manual DAV providers remain available.
 
+### Reversible CalDAV-to-JMAP switch
+
+Only an **enabled** configured CalDAV source can claim a JMAP mailbox. Disabling
+all of that mailbox's CalDAV sources keeps the local rows, colors and keyring
+credentials intact, while exposing the eligible JMAP account calendars. Re-
+enabling any matching CalDAV source immediately restores account-level CalDAV
+precedence. Do not remove DAV credentials, delete old sources, infer per-calendar
+identity from names/UIDs, or combine the two transports for one account.
+Disabled DAV rows may still appear in settings; they are not fetched, offered
+by the editor, or writable through the controller. The existing generic
+calendar.request backend also refuses an explicitly disabled source before
+credentials or transport are accessed. Only JMAP calendars with readable rights
+and default/subscribed membership appear.
+The current JMAP adapter is read-only, so the switch temporarily removes event
+creation/update/delete for that mailbox. Other accounts are unaffected.
+
+The development machine's private `calendars.json` is not part of the project:
+back it up with owner-only permissions before changing enabled flags, then
+inspect the merged sources and perform a read-only live query. Switching back
+uses the existing saved sources; never copy private URLs, usernames or keys into
+Git or test fixtures. This is a user choice, not a migration performed silently
+by the application.
+
+### Write-contract gate after the read-only slice
+
+The public API is still 6, with pinned/released API 5. Backend packaging admits
+only one unreleased revision at a time. Publishing/folding API 6 is a distinct
+release decision and **must precede** API-7 mutations; do not bump to 7 while
+releasedApiVersion is 5, and do not silently expand the fixed >=6 feature gate
+to create a method that an earlier API-6 backend does not advertise.
+
+The first API-7 mutation should be **contact creation only**, against an
+explicitly selected writable address book. Specify a bounded, validated
+protocol-neutral draft (name and email addresses; no raw JSContact or arbitrary
+provider properties); confirm rights from fresh `AddressBook/get` before sending
+an authenticated `ContactCard/set`. Construct a new card rather than editing the
+lossy `contacts.get` projection. Bind the write to a known server state with
+`ifInState`; distinguish a method-level `stateMismatch`, per-object `notCreated`,
+and a timeout/transport failure **after submission** whose delivery is unknown.
+Never automatically retry an unconfirmed create or treat HTTP success as object
+success. Responses contain only stable product errors and a confirmed opaque
+created id, not server descriptions or credentials. Account/source switches may
+hide an old callback but must not pretend a sent mutation was cancelled.
+
+Updates and deletes follow separately: preserve unknown JSContact fields and
+entry ids with narrow patch semantics, carry a revision captured at read time,
+check fresh rights, present a genuine conflict for a changed state, and never
+silently overwrite a remote edit. Calendar writes must independently establish
+resource identity, recurrence occurrence versus entire series, time-zone and
+scheduling semantics before exposing `CalendarEvent/set`. Only isolated
+synthetic books/calendars are live mutation fixtures; personal data is read-only
+until the complete behavior passes tests and review.
+
 ## Backend boundary
 
 The UI-facing methods use product concepts rather than protocol names. API 6

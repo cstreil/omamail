@@ -35,6 +35,23 @@ fn caldav_refuses_cross_origin_and_controls_before_credentials() {
 }
 
 #[test]
+fn disabled_calendar_refuses_all_requests_before_transport_or_credentials() {
+    for operation in ["list", "create", "update", "delete"] {
+        let params = json!({
+            "source":{"kind":"caldav","id":"caldav:old","enabled":false,
+                "url":"https://calendar.example/dav/","username":"me@example.test"},
+            "operation":operation,"body":"synthetic"
+        });
+        assert!(matches!(prepare(&params), Err("calendar_source_disabled")));
+    }
+    assert!(matches!(prepare(&json!({
+        "source":{"kind":"caldav","readOnly":true,"url":"https://calendar.example/dav/",
+            "username":"me@example.test"},
+        "operation":"create","body":"synthetic"
+    })), Err("calendar_read_only")));
+}
+
+#[test]
 fn provider_chooses_origin_and_encodes_event_id() {
     let request = prepare(&json!({"source":{"kind":"google"},"operation":"delete","eventId":"https://evil.example/a?b"})).unwrap();
     assert_eq!(request.url.host_str(), Some("www.googleapis.com"));

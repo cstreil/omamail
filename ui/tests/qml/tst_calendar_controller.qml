@@ -74,6 +74,9 @@ Item {
   TestCase {
     name: "CalendarController"
     SignalSpy { id: discoverySpy; target: controller; signalName: "discoveryFinished" }
+    SignalSpy { id: createdSpy; target: controller; signalName: "eventCreated" }
+    SignalSpy { id: updatedSpy; target: controller; signalName: "eventUpdated" }
+    SignalSpy { id: deletedSpy; target: controller; signalName: "eventDeleted" }
 
     property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
 
@@ -103,6 +106,9 @@ Item {
       mailService.configWrites = []
       mailService.configCallback = null
       discoverySpy.clear()
+      createdSpy.clear()
+      updatedSpy.clear()
+      deletedSpy.clear()
       mailService.unifiedCalendarView = false
       controller.accountId = "imap:work@example.com"
       controller.refreshScope = ""
@@ -365,6 +371,50 @@ Item {
       verify(cache !== null)
       cache.loaded = true
       return cache
+    }
+
+    function test_disabling_account_caldav_hands_display_to_jmap_without_deleting_preferences() {
+      var cache = prepareAccountCalendars()
+      controller.sourceList = ({version:1, sources:[{
+        id:"caldav:personal", kind:"caldav", name:"Old transport",
+        url:"https://calendar.example/personal/", username:"me@example.com",
+        enabled:true, colorKey:"accent"
+      }]})
+      compare(controller.availableSources.sources.length, 1,
+        "enabled CalDAV owns the account and suppresses duplicate JMAP sources")
+      var saved = JSON.parse(JSON.stringify(controller.sourceList))
+      saved.sources[0].enabled = false
+      controller.sourceList = saved
+      compare(controller.availableSources.sources.length, 3,
+        "disabled CalDAV remains in settings while JMAP calendars appear")
+      compare(controller.availableSources.sources[0].enabled, false)
+      compare(controller.availableSources.sources.filter(function(source) {
+        return source.kind === "account" && source.enabled
+      }).length, 2)
+      saved.sources[0].enabled = true
+      controller.sourceList = JSON.parse(JSON.stringify(saved))
+      compare(controller.availableSources.sources.length, 1,
+        "re-enabling CalDAV immediately restores its conservative precedence")
+      cache.loaded = false
+    }
+
+    function test_disabled_saved_calendar_refuses_create_edit_delete_before_network() {
+      controller.sourceList = ({version:1, sources:[{
+        id:"caldav:team", kind:"caldav", name:"Team",
+        url:"https://calendar.example/team/", username:"work@example.com",
+        enabled:false, readOnly:false, colorKey:"accent"
+      }]})
+      var synthetic = {sourceId:"caldav:team", href:"event.ics", uid:"synthetic"}
+      compare(controller.createEvent("caldav:team", {}), false)
+      compare(controller.updateEvent("caldav:team", synthetic, {}), false)
+      compare(controller.deleteEvent("caldav:team", synthetic), false)
+      compare(createdSpy.count, 1)
+      compare(updatedSpy.count, 1)
+      compare(deletedSpy.count, 1)
+      compare(Array.prototype.slice.call(createdSpy.signalArguments[0])[1],
+        "This calendar is disabled")
+      compare(mailService.requests.length, 0, "no disabled DAV request may reach the backend")
+      compare(mailService.credentialWrites.length, 0)
     }
 
     function test_account_calendars_use_one_protocol_neutral_range_request() {

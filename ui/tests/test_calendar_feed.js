@@ -416,6 +416,10 @@ assert.ok(preservedUpdate.ics.indexOf("BEGIN:VTIMEZONE") > 0)
 // client does not re-serialize. A recurring Google event edits fine — the
 // server keeps the rule and one occurrence is patched.
 assert.strictEqual(feed.writeRefusal(null, null), "Choose a calendar")
+assert.strictEqual(feed.writeRefusal({ kind: "caldav", enabled: false }, null),
+  "This calendar is disabled")
+assert.strictEqual(feed.writeRefusal({ kind: "google", enabled: false }, null),
+  "This calendar is disabled")
 assert.strictEqual(feed.writeRefusal({ kind: "caldav", readOnly: true }, null),
   "This calendar is read-only")
 assert.strictEqual(feed.writeRefusal({ kind: "google", readOnly: true }, null),

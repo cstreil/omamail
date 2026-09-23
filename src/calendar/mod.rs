@@ -98,6 +98,14 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
         "delete" => Method::DELETE,
         _ => return Err("calendar_invalid_operation"),
     };
+    // Reject an explicitly disabled source before any credential lookup or
+    // transport. The account-calendar UI retains DAV rows solely for rollback.
+    if source["enabled"] == false {
+        return Err("calendar_source_disabled");
+    }
+    if method != Method::GET && source["readOnly"] == true {
+        return Err("calendar_read_only");
+    }
     let body = params["body"].as_str().unwrap_or("").to_owned();
     if body.len() > LIMIT {
         return Err("calendar_input_too_large");

@@ -249,7 +249,9 @@ function withAccountCalendars(list, projected, accountSummaries) {
   var blocked = ({})
   for (var c = 0; c < current.length; c++) {
     var candidate = current[c] || {}
-    if (candidate.kind !== "caldav") continue
+    // A disabled DAV transport is retained for rollback but cannot suppress
+    // the active account projection: otherwise switching it off shows nothing.
+    if (candidate.kind !== "caldav" || candidate.enabled === false) continue
     var owner = trimmed(candidate.accountId)
     if (owner === "") owner = emailOwners[trimmed(candidate.username).toLowerCase()] || ""
     if (owner !== "" && allowed[owner]) blocked[owner] = true
@@ -459,10 +461,10 @@ function groupByAccount(list, accountSummaries) {
   return groups
 }
 
-// A calendar a write can be offered on. A read-only source still draws its
-// events; it is not offered as somewhere to put one.
+// A calendar a write can be offered on. Disabled sources stay configured for
+// rollback, but must not remain selectable while another transport is active.
 function writable(source) {
-  return !!source && source.readOnly !== true
+  return !!source && source.enabled !== false && source.readOnly !== true
 }
 
 // The picker groups with the read-only calendars left out, and a group left

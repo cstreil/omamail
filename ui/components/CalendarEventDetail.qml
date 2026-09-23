@@ -39,7 +39,7 @@ Rectangle {
   // and an href that resolves outside the source's own origin is refused by
   // the same rule the controller applies before any credential is read.
   readonly property bool canWrite: !!root.source && !!event
-    && root.source.readOnly !== true
+    && root.source.enabled !== false && root.source.readOnly !== true
     && (root.source.kind === "google" ? String(event.googleId || "") !== ""
       : root.source.kind === "microsoft" ? String(event.graphId || "") !== ""
       : String(event.href || "") !== "" && String(event.recurrenceRule || "") === ""

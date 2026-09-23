@@ -700,6 +700,7 @@ function createEvent(fields, nowMs) {
 // apply.
 function writeRefusal(source, event) {
   if (!source) return "Choose a calendar"
+  if (source.enabled === false) return "This calendar is disabled"
   if (source.readOnly === true) return "This calendar is read-only"
   if (source.kind !== "caldav" && source.kind !== "icloud") return ""
   // A RECURRENCE-ID too malformed to parse leaves recurrenceIdMs at 0, but
