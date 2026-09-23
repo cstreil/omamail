@@ -8,6 +8,7 @@ import ssl
 import socket
 import threading
 import sys
+import uuid
 
 scenario = sys.argv[1] if len(sys.argv) > 1 else "default"
 
@@ -121,8 +122,14 @@ with contextlib.nullcontext(pathlib.Path(__file__).parent.parent / "testdata" / 
                     if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"] or args.get("accountId")!="contacts-account": replies.append(["error",{"type":"accountNotFound"},id]);continue
                     result={"list":[
                         {"id":"hidden","name":"Hidden","isDefault":True,"isSubscribed":True,"myRights":{"mayRead":False}},
-                        {"id":"book","name":"Contacts","isDefault":True,"isSubscribed":True,"myRights":{"mayRead":True,"mayWrite":True}}
-                    ],"state":"books-1"}
+                        {"id":"book","name":"Contacts","isDefault":True,"isSubscribed":True,"myRights":{"mayRead":scenario!="contact-create-unreadable","mayWrite":scenario!="contact-create-denied"}}
+                    ],"state":"books-1","accountId":"contacts-account","notFound":[]}
+                    if scenario.startswith("contact-create-"):
+                        assert args.get("ids")==["book"] and args.get("properties")==["id","myRights"]
+                        result["list"]=[result["list"][1]]
+                        if scenario=="contact-create-unknown-book":
+                            result["list"]=[];result["notFound"]=["book"]
+                        if scenario=="contact-create-wrong-book-account": result["accountId"]="other"
                 elif method=="ContactCard/query":
                     if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"] or args.get("accountId")!="contacts-account" or args.get("filter",{}).get("inAddressBook")!="book": replies.append(["error",{"type":"invalidArguments"},id]);continue
                     text=str(args.get("filter",{}).get("text","")).lower()
@@ -148,7 +155,41 @@ with contextlib.nullcontext(pathlib.Path(__file__).parent.parent / "testdata" / 
                         "contact-1":{"id":"contact-1","addressBookIds":{"book":True},"name":{"full":"Alice","components":[{"kind":"given","value":"Alice"}]},"emails":{"a":{"address":"alice@example.test"}},"phones":{},"addresses":{}},
                         "contact-2":{"id":"contact-2","addressBookIds":{"book":True},"name":{"full":"Bob","components":[{"kind":"given","value":"Bob"},{"kind":"surname","value":"Example"}]},"emails":{"a":{"address":"bob@example.test","contexts":{"work":True}},"b":{"address":"BOB@example.test"}},"phones":{"p":{"number":"+49-000-000001","label":"mobile"}},"addresses":{"a":{"components":[{"kind":"street","value":"Example Street 1"},{"kind":"locality","value":"Example City"}]}}}
                     }
-                    result={"list":[cards[v] for v in args.get("ids",[]) if v in cards],"state":"cards-1"}
+                    result={"list":[cards[v] for v in args.get("ids",[]) if v in cards],"state":"cards-1","accountId":"contacts-account","notFound":[]}
+                    if scenario.startswith("contact-create-"):
+                        assert args.get("ids")==[] and args.get("properties")==["id"]
+                        assert result["list"]==[]
+                elif method=="ContactCard/set":
+                    # Exact outbound payload, including RFC 9553 mandatory
+                    # metadata. Never reflect credentials or remote descriptions.
+                    assert scenario.startswith("contact-create-")
+                    assert body.get("using")==["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"]
+                    assert set(args)=={"accountId","ifInState","create"}
+                    assert args["accountId"]=="contacts-account" and args["ifInState"]=="cards-1"
+                    assert set(args["create"])=={"new"}
+                    card=args["create"]["new"]
+                    assert set(card)=={"@type","version","uid","addressBookIds","name","emails"}
+                    assert card["@type"]=="Card" and card["version"]=="1.0"
+                    assert card["uid"].startswith("urn:uuid:") and uuid.UUID(card["uid"][9:]).version==4
+                    assert card["addressBookIds"]=={"book":True}
+                    assert card["name"]=={"full":"Synthetic Person"}
+                    assert card["emails"]=={"e1":{"address":"one@example.test"},"e2":{"address":"two@example.test"}}
+                    if scenario=="contact-create-disconnect":
+                        self.connection.shutdown(socket.SHUT_RDWR);self.connection.close();return
+                    if scenario=="contact-create-malformed":
+                        self.answer(b"{not-json");return
+                    if scenario=="contact-create-state-mismatch":
+                        replies.append(["error",{"type":"stateMismatch","description":"synthetic-secret"},id]);continue
+                    if scenario=="contact-create-server-partial-fail":
+                        replies.append(["error",{"type":"serverPartialFail","description":"synthetic-secret"},id]);continue
+                    result={"accountId":"contacts-account","oldState":"cards-1","newState":"cards-2",
+                            "created":{"new":{"id":"contact-created"}},"notCreated":None}
+                    if scenario=="contact-create-not-created":
+                        result["created"]=None
+                        result["notCreated"]={"new":{"type":"invalidProperties","description":"synthetic-secret"}}
+                    if scenario=="contact-create-null-old-state": result["oldState"]=None
+                    if scenario=="contact-create-bad-response": result["accountId"]="wrong-account"
+                    if scenario=="contact-create-bad-id": result["created"]["new"]["id"]="bad/id"
                 elif method=="Calendar/get":
                     if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:calendars"] or args.get("accountId")!="calendar-account": replies.append(["error",{"type":"accountNotFound"},id]);continue
                     result={"list":[
