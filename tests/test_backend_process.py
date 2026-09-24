@@ -152,7 +152,10 @@ def main():
     qs = shutil.which("qs")
     if not qs:
         raise SystemExit("Quickshell is required: install it, then rerun make test-backend-process")
-    binary = ROOT / "target/debug/omamail"
+    target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).expanduser()
+    if not target.is_absolute():
+        target = ROOT / target
+    binary = target / "debug/omamail"
     version = tomllib.loads((ROOT / "Cargo.toml").read_text())["package"]["version"]
     with tempfile.TemporaryDirectory(prefix="omamail-backend-process-") as directory:
         temporary = Path(directory)

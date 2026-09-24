@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 """The local standalone targets use the portable backend and explicit dev paths."""
 from pathlib import Path
+import os
 import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
+APP_TARGET_DIR = Path(os.environ.get("APP_TARGET_DIR", ROOT / "target/standalone")).resolve()
+APP_BUILD_ARG = os.environ.get("APP_BUILD_DIR", "app/build")
+APP_BUILD_DIR = Path(APP_BUILD_ARG)
+if not APP_BUILD_DIR.is_absolute():
+    APP_BUILD_DIR = ROOT / APP_BUILD_DIR
+APP_BUILD_DIR = APP_BUILD_DIR.resolve()
 
 
 def make(*args):
@@ -20,7 +27,7 @@ assert "make app-run" in help_text
 build = make("-n", "app-build")
 assert "cargo build --locked --no-default-features --features standalone" in build
 assert '-DOMAMAIL_BACKEND="' in build
-assert "/target/standalone/debug/omamail" in build
+assert f'{APP_TARGET_DIR}/debug/omamail' in build
 assert "cmake --build" in build
 
 run = make("-n", "app-run")
@@ -31,8 +38,8 @@ launches = [
 assert len(launches) == 1, run
 launch = launches[0]
 assert "OMAMAIL_DEVELOPMENT_RESOURCES=1" in launch
-assert 'OMAMAIL_BIN="' in launch and "/target/standalone/debug/omamail" in launch
-assert "/app/build/omamail-app" in launch
+assert 'OMAMAIL_BIN="' in launch and f'{APP_TARGET_DIR}/debug/omamail' in launch
+assert f'{APP_BUILD_DIR}/omamail-app' in launch
 assert "backend-runtime.py" not in run
 assert "install" not in run
 assert "PATH=" not in launch
@@ -49,5 +56,16 @@ assert 'test-app-qml:\n\t@test -n "$(QMLTESTRUNNER)"' in makefile
 qml = make("-n", "test-app-qml", "QMLTESTRUNNER=/synthetic/qt/bin/qmltestrunner")
 assert '-DQMLTESTRUNNER_EXECUTABLE="/synthetic/qt/bin/qmltestrunner"' in qml
 assert '--no-tests=error' in qml
+lint = make("-n", "qml-check")
+assert f'-I "{APP_BUILD_ARG}/qml"' in lint
+
+# Relative overrides must be anchored to the checkout before CMake reads the
+# backend path, and app-run must launch the binary in the external build tree.
+relative = make("-n", "app-run", "APP_TARGET_DIR=../external-target/standalone",
+                "APP_BUILD_DIR=../external-app-build")
+assert '--target-dir "../external-target/standalone"' in relative
+assert 'cmake -S app -B "../external-app-build"' in relative
+assert f'-DOMAMAIL_BACKEND="{ROOT.parent}/external-target/standalone/debug/omamail"' in relative
+assert f'"{ROOT.parent}/external-app-build/omamail-app"' in relative
 
 print("test_app_make.py ok")

@@ -14,7 +14,10 @@ import unittest
 
 import test_agent_bridge as legacy
 
-BINARY = Path(os.environ.get('OMAMAIL_TEST_BIN') or Path(__file__).resolve().parents[1] / 'target/debug/omamail').resolve()
+TARGET = Path(os.environ.get('CARGO_TARGET_DIR', Path(__file__).resolve().parents[1] / 'target')).expanduser()
+if not TARGET.is_absolute():
+    TARGET = Path(__file__).resolve().parents[1] / TARGET
+BINARY = Path(os.environ.get('OMAMAIL_TEST_BIN') or TARGET / 'debug/omamail').resolve()
 
 
 class NativeBridge(legacy.Bridge):
