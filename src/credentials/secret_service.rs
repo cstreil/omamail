@@ -155,7 +155,16 @@ where
             if !repeatable {
                 return Err(fault.error());
             }
-            attempt(shared, key, operation, &connect, until).map_err(|(_, fault)| fault.error())
+            match attempt(shared, key, operation, &connect, until) {
+                Ok(secret) => Ok(secret),
+                Err((_, Fault::Answer(error))) => Err(error),
+                Err((session, fault)) => {
+                    if let Some(session) = session {
+                        invalidate(shared, &session);
+                    }
+                    Err(fault.error())
+                }
+            }
         }
     }
 }
