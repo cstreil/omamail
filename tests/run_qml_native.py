@@ -23,7 +23,9 @@ def main():
                  XDG_CACHE_HOME=str(directory/'cache'),XDG_DATA_HOME=str(directory/'data'),XDG_STATE_HOME=str(directory/'state'),
                  QT_QPA_PLATFORM='offscreen',QT_QUICK_BACKEND='software',QT_QPA_PLATFORMTHEME='',GSETTINGS_BACKEND='memory')
         for name in ['home','config','cache','data','state']:(directory/name).mkdir()
-        backend=subprocess.Popen([str(ROOT/'target/debug/omamail'),'serve'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=env)
+        target=Path(os.environ.get('CARGO_TARGET_DIR',ROOT/'target')).expanduser()
+        if not target.is_absolute():target=ROOT/target
+        backend=subprocess.Popen([str(target/'debug/omamail'),'serve'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=env)
         lock=threading.Lock()
         secret=secrets.token_urlsafe(24)
         class Handler(http.server.BaseHTTPRequestHandler):

@@ -2,12 +2,17 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-binary="$root/target/debug/omamail"
+case ${CARGO_TARGET_DIR-} in
+  '') target="$root/target" ;;
+  /*) target="$CARGO_TARGET_DIR" ;;
+  *) target="$root/$CARGO_TARGET_DIR" ;;
+esac
+binary="$target/debug/omamail"
 
 build_backend() {
   cargo build --locked \
     --manifest-path "$root/Cargo.toml" \
-    --target-dir "$root/target" \
+    --target-dir "$target" \
     --bin omamail
 }
 

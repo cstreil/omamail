@@ -1,5 +1,6 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
 CARGO_TARGET_DIR ?= $(CURDIR)/target
+export PYTHONDONTWRITEBYTECODE ?= 1
 .DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
@@ -80,8 +81,8 @@ APP_QML_FILES := app/qml/Main.qml app/qml/StandaloneShell.qml app/qml/Standalone
 APP_BUILD_DIR ?= app/build
 APP_EXEEXT := $(if $(filter Windows_NT,$(OS)),.exe,)
 APP_TARGET_DIR ?= $(CURDIR)/target/standalone
-APP_BACKEND := $(APP_TARGET_DIR)/debug/omamail$(APP_EXEEXT)
-APP_EXECUTABLE := $(CURDIR)/$(APP_BUILD_DIR)/omamail-app$(APP_EXEEXT)
+APP_BACKEND := $(abspath $(APP_TARGET_DIR))/debug/omamail$(APP_EXEEXT)
+APP_EXECUTABLE := $(abspath $(APP_BUILD_DIR))/omamail-app$(APP_EXEEXT)
 
 .PHONY: test test-js test-shell test-shell-portable test-shell-libcurl \
 	test-qml test-app-qml test-local test-backend-process qml-check validate bench install \
@@ -267,7 +268,7 @@ bench:
 # Needs the Omarchy shell's qs.Commons / qs.Ui on the import path.
 qml-check:
 	$(QMLLINT) -I /usr/share/omarchy/shell $(QML_FILES)
-	$(QMLLINT) -I app/qml/imports -I app/build/qml $(APP_QML_FILES)
+	$(QMLLINT) -I app/qml/imports -I "$(APP_BUILD_DIR)/qml" $(APP_QML_FILES)
 
 validate: test test-app-qml qml-check
 	omarchy plugin validate .
