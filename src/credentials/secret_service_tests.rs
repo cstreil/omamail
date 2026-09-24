@@ -25,6 +25,15 @@ impl Drop for Daemon {
 struct Service {
     denial: bool,
     missing: bool,
+    /// Reports the item as present but locked, which the daemon answers over a
+    /// connection that is still good.
+    locked: bool,
+    /// Counts negotiated sessions, which is what tells a reused connection from
+    /// one rebuilt per operation.
+    sessions: Arc<AtomicUsize>,
+    searches: Arc<AtomicUsize>,
+    /// Searches to fail before answering, for exercising reconnection.
+    failures: Arc<AtomicUsize>,
 }
 #[zbus::interface(name = "org.freedesktop.Secret.Service")]
 impl Service {
@@ -36,23 +45,62 @@ impl Service {
         if self.denial {
             return Err(zbus::fdo::Error::AccessDenied("synthetic denial".into()));
         }
+        self.sessions.fetch_add(1, Ordering::SeqCst);
         Ok((
             Value::from(vec![2u8]).try_into().unwrap(),
             path("/org/freedesktop/secrets/session/one"),
         ))
     }
+    fn read_alias(&self, _name: &str) -> OwnedObjectPath {
+        path("/org/freedesktop/secrets/collection/default")
+    }
     fn search_items(
         &self,
         _attributes: HashMap<String, String>,
-    ) -> (Vec<OwnedObjectPath>, Vec<OwnedObjectPath>) {
-        (
+    ) -> zbus::fdo::Result<(Vec<OwnedObjectPath>, Vec<OwnedObjectPath>)> {
+        self.searches.fetch_add(1, Ordering::SeqCst);
+        if self
+            .failures
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                left.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(zbus::fdo::Error::Failed("synthetic failure".into()));
+        }
+        if self.locked {
+            return Ok((vec![], vec![path("/org/freedesktop/secrets/item/one")]));
+        }
+        Ok((
             if self.missing {
                 vec![]
             } else {
                 vec![path("/org/freedesktop/secrets/item/one")]
             },
             vec![],
-        )
+        ))
+    }
+}
+/// The default collection, so a Put reaches CreateItem. It counts the calls
+/// that actually reached the daemon, then refuses, which is the shape of a
+/// write the daemon commits and the client never hears about.
+struct Collection {
+    creates: Arc<AtomicUsize>,
+}
+#[zbus::interface(name = "org.freedesktop.Secret.Collection")]
+impl Collection {
+    #[zbus(property)]
+    fn locked(&self) -> bool {
+        false
+    }
+    fn create_item(
+        &self,
+        _properties: HashMap<String, zbus::zvariant::OwnedValue>,
+        _secret: (OwnedObjectPath, Vec<u8>, Vec<u8>, String),
+        _replace: bool,
+    ) -> zbus::fdo::Result<(OwnedObjectPath, OwnedObjectPath)> {
+        self.creates.fetch_add(1, Ordering::SeqCst);
+        Err(zbus::fdo::Error::Failed("synthetic write failure".into()))
     }
 }
 struct Item;
@@ -66,11 +114,17 @@ impl Item {
         path("/org/freedesktop/secrets/prompt/stuck")
     }
 }
-struct Prompt(Arc<AtomicUsize>);
+struct Prompt(
+    Arc<AtomicUsize>,
+    Arc<Mutex<Option<std::sync::mpsc::Sender<()>>>>,
+);
 #[zbus::interface(name = "org.freedesktop.Secret.Prompt")]
 impl Prompt {
     fn prompt(&self, _window_id: &str) {
         self.0.fetch_add(1, Ordering::SeqCst);
+        if let Some(ready) = self.1.lock().unwrap().as_ref() {
+            let _ = ready.send(());
+        }
     }
     // Deliberately never emits Completed. This is a real signal wait inside the
     // secret-service crate, rather than a pending future substituted for it.
@@ -81,10 +135,23 @@ struct Fixture {
     connection: zbus::Connection,
     address: String,
     prompts: Arc<AtomicUsize>,
+    prompt_ready: Arc<Mutex<Option<std::sync::mpsc::Sender<()>>>>,
+    sessions: Arc<AtomicUsize>,
+    searches: Arc<AtomicUsize>,
+    creates: Arc<AtomicUsize>,
     _daemon: Daemon,
 }
 impl Fixture {
     fn new(denial: bool, missing: bool) -> Self {
+        Self::build(denial, missing, false, 0)
+    }
+    fn with_failures(denial: bool, missing: bool, failures: usize) -> Self {
+        Self::build(denial, missing, false, failures)
+    }
+    fn with_locked_item() -> Self {
+        Self::build(false, false, true, 0)
+    }
+    fn build(denial: bool, missing: bool, locked: bool, failures: usize) -> Self {
         let mut daemon = Daemon(
             Command::new("dbus-daemon")
                 .args([
@@ -104,6 +171,11 @@ impl Fixture {
             .unwrap();
         let address = address.trim().to_owned();
         let prompts = Arc::new(AtomicUsize::new(0));
+        let prompt_ready = Arc::new(Mutex::new(None));
+        let sessions = Arc::new(AtomicUsize::new(0));
+        let searches = Arc::new(AtomicUsize::new(0));
+        let failures = Arc::new(AtomicUsize::new(failures));
+        let creates = Arc::new(AtomicUsize::new(0));
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -114,13 +186,30 @@ impl Fixture {
                 .unwrap()
                 .name("org.freedesktop.secrets")
                 .unwrap()
-                .serve_at("/org/freedesktop/secrets", Service { denial, missing })
+                .serve_at(
+                    "/org/freedesktop/secrets",
+                    Service {
+                        denial,
+                        missing,
+                        locked,
+                        sessions: sessions.clone(),
+                        searches: searches.clone(),
+                        failures: failures.clone(),
+                    },
+                )
                 .unwrap()
                 .serve_at("/org/freedesktop/secrets/item/one", Item)
                 .unwrap()
                 .serve_at(
+                    "/org/freedesktop/secrets/collection/default",
+                    Collection {
+                        creates: creates.clone(),
+                    },
+                )
+                .unwrap()
+                .serve_at(
                     "/org/freedesktop/secrets/prompt/stuck",
-                    Prompt(prompts.clone()),
+                    Prompt(prompts.clone(), prompt_ready.clone()),
                 )
                 .unwrap()
                 .build()
@@ -132,6 +221,10 @@ impl Fixture {
             connection,
             address,
             prompts,
+            prompt_ready,
+            sessions,
+            searches,
+            creates,
             _daemon: daemon,
         }
     }
@@ -158,31 +251,66 @@ fn key() -> CredentialKey {
 #[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
 fn credentials_native_linux_never_completing_prompt_releases_worker_and_connection() {
     let fixture = Fixture::new(false, false);
-    let connect = fixture.client();
+    let shared = Shared::new().unwrap();
+    // Pre-negotiate the private DH session separately. Its CPU-bound key
+    // exchange must not consume a 150 ms budget meant to test cancellation of
+    // the *prompt*. The stalled-connect test covers the whole deadline.
+    let connection = shared.runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(3), fixture.client())
+            .await
+            .expect("private bus connect exceeded setup budget")
+            .expect("private bus connect refused")
+    });
+    let name = connection.unique_name().unwrap().to_string();
+    let Ok(warm) = acquire(
+        &shared,
+        &|| async { Ok(connection.clone()) },
+        Instant::now() + Duration::from_secs(3),
+    ) else {
+        panic!("private Secret Service session could not be negotiated");
+    };
+    drop(warm);
+    let (prompt_sender, prompt_receiver) = std::sync::mpsc::channel();
+    *fixture.prompt_ready.lock().unwrap() = Some(prompt_sender);
+
     let guard = Arc::new(Mutex::new(()));
     let worker_guard = guard.clone();
     let (sender, receiver) = std::sync::mpsc::channel();
-    let (name_sender, name_receiver) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
         let _guard = worker_guard.lock().unwrap();
-        let result = run_with(
+        let started = Instant::now();
+        let result = run_on(
+            &shared,
             &key(),
             Operation::Delete,
-            async {
-                let connection = connect.await?;
-                name_sender
-                    .send(connection.unique_name().unwrap().to_string())
-                    .unwrap();
-                Ok(connection)
-            },
-            Duration::from_millis(150),
+            || async { Err(Error::Unavailable) },
+            Duration::from_secs(2),
         );
-        sender.send(result.map(|_| ())).unwrap();
+        let elapsed = started.elapsed();
+        let evicted = slot(&shared).is_none();
+        let Shared { runtime, session } = shared;
+        drop(session);
+        runtime.block_on(async { close(connection).await });
+        runtime.shutdown_timeout(Duration::ZERO);
+        sender.send((result.map(|_| ()), elapsed, evicted)).unwrap();
     });
-    assert_eq!(
-        receiver.recv_timeout(Duration::from_secs(3)).unwrap(),
-        Err(Error::Unavailable)
+    prompt_receiver
+        .recv_timeout(Duration::from_millis(1500))
+        .expect("the native prompt was not reached before the operation deadline");
+    assert!(
+        matches!(
+            receiver.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ),
+        "the worker finished before waiting for prompt completion"
     );
+    let (result, elapsed, evicted) = receiver.recv_timeout(Duration::from_secs(4)).unwrap();
+    assert_eq!(result, Err(Error::Unavailable));
+    assert!(
+        elapsed >= Duration::from_millis(1800) && elapsed <= Duration::from_secs(3),
+        "the prompt failure did not respect the two-second operation deadline: {elapsed:?}"
+    );
+    assert!(evicted, "the timed-out session remained cached");
     worker.join().unwrap();
     assert!(
         guard.try_lock().is_ok(),
@@ -193,7 +321,6 @@ fn credentials_native_linux_never_completing_prompt_releases_worker_and_connecti
         1,
         "fixture did not reach the native prompt signal wait"
     );
-    let name = name_receiver.recv_timeout(Duration::from_secs(1)).unwrap();
     fixture.runtime.block_on(async {
         let proxy = zbus::fdo::DBusProxy::new(&fixture.connection)
             .await
@@ -232,4 +359,223 @@ fn credentials_native_linux_denial_and_unavailability_are_not_missing() {
         run_with(&key(), Operation::Get, failed, DEADLINE),
         Err(Error::Unavailable)
     ));
+}
+
+/// The regression test for the per-operation session. Opening a session for
+/// every credential read and force-closing it afterwards races
+/// gnome-keyring's own handshake, which aborts the daemon holding every
+/// credential on the machine. Against the unfixed code this counts three.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_reuses_one_session_across_operations() {
+    let fixture = Fixture::new(false, true);
+    let shared = Shared::new().unwrap();
+
+    for _ in 0..3 {
+        assert!(matches!(
+            run_on(
+                &shared,
+                &key(),
+                Operation::Get,
+                || fixture.client(),
+                DEADLINE
+            ),
+            Err(Error::Missing)
+        ));
+    }
+
+    assert_eq!(
+        fixture.sessions.load(Ordering::SeqCst),
+        1,
+        "each credential operation negotiated its own session"
+    );
+}
+
+/// A session the daemon has forgotten fails like an absent one, so the
+/// operation has to survive it rather than report a failure the caller cannot
+/// act on. Without the retry the first read after a daemon restart just fails.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_reconnects_after_a_transport_failure() {
+    let fixture = Fixture::with_failures(false, true, 1);
+    let shared = Shared::new().unwrap();
+
+    assert!(
+        matches!(
+            run_on(
+                &shared,
+                &key(),
+                Operation::Get,
+                || fixture.client(),
+                DEADLINE
+            ),
+            Err(Error::Missing)
+        ),
+        "a transport failure was reported instead of being retried"
+    );
+    assert_eq!(
+        fixture.sessions.load(Ordering::SeqCst),
+        2,
+        "the failed session was reused rather than replaced"
+    );
+}
+
+/// If both attempts at a read fail, its replacement session must also be
+/// evicted. A later write cannot be retried after delivery, so it must start
+/// with a fresh session instead of inheriting that failed read's connection.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_evicts_session_after_two_read_transport_failures() {
+    let fixture = Fixture::with_failures(false, true, 2);
+    let shared = Shared::new().unwrap();
+
+    assert!(matches!(
+        run_on(
+            &shared,
+            &key(),
+            Operation::Get,
+            || fixture.client(),
+            DEADLINE
+        ),
+        Err(Error::Unavailable)
+    ));
+    assert_eq!(fixture.searches.load(Ordering::SeqCst), 2);
+    assert_eq!(fixture.sessions.load(Ordering::SeqCst), 2);
+
+    assert!(matches!(
+        run_on(
+            &shared,
+            &key(),
+            Operation::Put(b"synthetic"),
+            || fixture.client(),
+            DEADLINE
+        ),
+        Err(Error::Unavailable)
+    ));
+    assert_eq!(
+        fixture.sessions.load(Ordering::SeqCst),
+        3,
+        "the second failed read left a broken session cached for the write"
+    );
+    assert_eq!(
+        fixture.creates.load(Ordering::SeqCst),
+        1,
+        "the following write must reach the daemon only once"
+    );
+}
+
+/// Missing is an answer, not a transport failure: it must neither drop the
+/// session nor spend the retry, or every absent credential would cost a
+/// reconnection and a second search.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_keeps_the_session_when_an_item_is_missing() {
+    let fixture = Fixture::new(false, true);
+    let shared = Shared::new().unwrap();
+
+    assert!(matches!(
+        run_on(
+            &shared,
+            &key(),
+            Operation::Get,
+            || fixture.client(),
+            DEADLINE
+        ),
+        Err(Error::Missing)
+    ));
+
+    assert_eq!(
+        fixture.searches.load(Ordering::SeqCst),
+        1,
+        "a missing item was retried as though the transport had failed"
+    );
+    assert_eq!(fixture.sessions.load(Ordering::SeqCst), 1);
+}
+
+/// A write is never repeated. A request already on the socket cannot be
+/// retracted, so a `CreateItem` the daemon committed before the connection
+/// failed would be made a second time, leaving two items with the same
+/// attributes; `find` answers `Ambiguous` for both from then on, and the
+/// credential can no longer be read or deleted by Omamail at all. The daemon
+/// counts the calls that reached it, so this asserts the forbidden effect did
+/// not happen rather than only that an error came back.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_a_failed_write_reaches_the_daemon_once() {
+    let fixture = Fixture::new(false, true);
+    let shared = Shared::new().unwrap();
+
+    assert!(matches!(
+        run_on(
+            &shared,
+            &key(),
+            Operation::Put(b"synthetic"),
+            || fixture.client(),
+            DEADLINE
+        ),
+        Err(Error::Unavailable)
+    ));
+    assert_eq!(
+        fixture.creates.load(Ordering::SeqCst),
+        1,
+        "the daemon was asked to create the item twice for one put"
+    );
+}
+
+/// A locked keyring is an answer, not a broken connection. Dropping the session
+/// for it would renegotiate a session on every read in exactly the state where
+/// the daemon is least able to survive one.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_a_locked_item_keeps_the_session() {
+    let fixture = Fixture::with_locked_item();
+    let shared = Shared::new().unwrap();
+
+    for _ in 0..2 {
+        assert!(matches!(
+            run_on(
+                &shared,
+                &key(),
+                Operation::Get,
+                || fixture.client(),
+                DEADLINE
+            ),
+            Err(Error::Unavailable)
+        ));
+    }
+
+    assert_eq!(
+        fixture.sessions.load(Ordering::SeqCst),
+        1,
+        "a locked item was treated as a failed connection and renegotiated"
+    );
+    assert_eq!(fixture.searches.load(Ordering::SeqCst), 2);
+}
+
+/// One operation costs the caller one deadline. Opening the session and running
+/// the operation share a single budget, so a connect that never answers cannot
+/// be waited for once and then waited for again.
+#[test]
+fn credentials_native_linux_a_stalled_connect_costs_one_deadline() {
+    let shared = Shared::new().unwrap();
+    let deadline = Duration::from_millis(300);
+
+    let started = std::time::Instant::now();
+    let result = run_on(
+        &shared,
+        &key(),
+        Operation::Get,
+        || async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Err(Error::Unavailable)
+        },
+        deadline,
+    );
+    let elapsed = started.elapsed();
+
+    assert!(matches!(result, Err(Error::Unavailable)));
+    assert!(
+        elapsed < deadline + deadline / 2,
+        "one credential operation waited {elapsed:?} for a {deadline:?} deadline"
+    );
 }
