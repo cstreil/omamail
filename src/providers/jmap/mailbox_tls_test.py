@@ -117,6 +117,46 @@ with contextlib.nullcontext(pathlib.Path(__file__).parent.parent / "testdata" / 
                     missing={"no-archive":"archive","no-trash":"trash","no-inbox":"inbox"}.get(scenario)
                     result["list"]=[box for box in result["list"] if box["role"]!=missing]
                     if scenario=="roles": result["list"][0]["id"]="NEW"
+                elif method=="AddressBook/get":
+                    if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"] or args.get("accountId")!="contacts-account": replies.append(["error",{"type":"accountNotFound"},id]);continue
+                    result={"list":[
+                        {"id":"hidden","name":"Hidden","isDefault":True,"isSubscribed":True,"myRights":{"mayRead":False}},
+                        {"id":"book","name":"Contacts","isDefault":True,"isSubscribed":True,"myRights":{"mayRead":True,"mayWrite":True}}
+                    ],"state":"books-1"}
+                    if scenario=="contact-duplicate-books":
+                        result["list"].append({"id":"book","name":"Contradictory rights","myRights":{"mayRead":False}})
+                elif method=="ContactCard/query":
+                    if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"] or args.get("accountId")!="contacts-account" or args.get("filter",{}).get("inAddressBook")!="book": replies.append(["error",{"type":"invalidArguments"},id]);continue
+                    text=str(args.get("filter",{}).get("text","")).lower()
+                    if text and not any(needle in text for needle in ("alice","bob")):
+                        result={"ids":[],"position":0,"total":0,"queryState":"query-1"}
+                    else:
+                        all_ids=["contact-1","contact-2"]
+                        position=int(args.get("position",0))
+                        requested=max(0,int(args.get("limit",len(all_ids))))
+                        # A conforming server may cap a requested page. Returning
+                        # one id at a time makes every client prove it follows
+                        # ContactCard/query until the reported total is complete.
+                        page=all_ids[position:position+min(requested,1)]
+                        if scenario=="contact-query-stall" and position>0: page=[]
+                        if scenario=="contact-query-duplicate" and position>0: page=["contact-1"]
+                        reported_position=position+1 if scenario=="contact-query-wrong-position" else position
+                        reported_total=1001 if scenario=="contact-query-too-many" else len(all_ids)
+                        query_state="query-2" if scenario=="contact-query-state-change" and position>0 else "query-1"
+                        result={"ids":page,"position":reported_position,"total":reported_total,"queryState":query_state,"canCalculateChanges":True}
+                elif method=="ContactCard/get":
+                    if body.get("using")!=["urn:ietf:params:jmap:core","urn:ietf:params:jmap:contacts"] or args.get("accountId")!="contacts-account": replies.append(["error",{"type":"invalidArguments"},id]);continue
+                    cards={
+                        "contact-1":{"id":"contact-1","addressBookIds":{"book":True},"name":{"full":"Alice","components":[{"kind":"given","value":"Alice"}]},"emails":{"a":{"address":"alice@example.test"}},"phones":{},"addresses":{}},
+                        "contact-2":{"id":"contact-2","addressBookIds":{"book":True},"name":{"full":"Bob","components":[{"kind":"given","value":"Bob"},{"kind":"surname","value":"Example"}]},"emails":{"a":{"address":"bob@example.test","contexts":{"work":True}},"b":{"address":"BOB@example.test"}},"phones":{"p":{"number":"+49-000-000001","label":"mobile"}},"addresses":{"a":{"components":[{"kind":"street","value":"Example Street 1"},{"kind":"locality","value":"Example City"}]}}}
+                    }
+                    memberships={"contact-hidden-only":{"hidden":True},
+                                 "contact-false-member":{"book":False},
+                                 "contact-wrong-book":{"other":True},
+                                 "contact-mixed-books":{"hidden":True,"book":True}}.get(scenario)
+                    if memberships is not None:
+                        for card in cards.values(): card["addressBookIds"]=memberships
+                    result={"list":[cards[v] for v in args.get("ids",[]) if v in cards],"state":"cards-1"}
                 else: replies.append(["error",{"type":"unknownMethod"},id]);continue
                 replies.append([method,result,id])
             self.answer({"methodResponses":None if scenario=="bad-envelope" else replies,"sessionState":"s1"})
