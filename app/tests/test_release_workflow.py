@@ -124,6 +124,8 @@ class ReleaseWorkflowContract(unittest.TestCase):
                     self.assertEqual(block.count("QT_QPA_PLATFORM: offscreen"), 1)
                     self.assertEqual(block.count("QT_QPA_PLATFORM: windows"), 1)
                     self.assertIn("package-release.ps1", block)
+                    self.assertIn("ConvertFrom-Json -AsHashtable", block)
+                    self.assertIn("ConvertFrom-Json -AsHashtable", (ROOT / "app/scripts/package-release.ps1").read_text())
                     self.assertNotRegex(block, r"(?i)\$host\s*=")
                     self.assertIn("& $appExecutable --smoke-test", block)
                     self.assertIn("Test-Package.ps1", block)

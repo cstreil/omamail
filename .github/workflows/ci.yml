@@ -211,12 +211,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $api = Get-Content backend-api.json -Raw | ConvertFrom-Json
-          if ([int]$api.apiVersion -ne [int]$api.releasedApiVersion -and
-              [int]$api.apiVersion -ne ([int]$api.releasedApiVersion + 1)) {
+          $api = Get-Content backend-api.json -Raw | ConvertFrom-Json -AsHashtable
+          if ([int]($api['apiVersion']) -ne [int]($api['releasedApiVersion']) -and
+              [int]($api['apiVersion']) -ne ([int]($api['releasedApiVersion']) + 1)) {
               throw 'invalid source API revision'
           }
-          if ([int]$api.apiVersion -gt [int]$api.releasedApiVersion) {
+          if ([int]($api['apiVersion']) -gt [int]($api['releasedApiVersion'])) {
               $version = python scripts/package-backend.py pin-version
               New-Item -ItemType Directory -Force published | Out-Null
               gh release download "v$version" --dir published --pattern omamail-app-windows-x86_64.zip --pattern SHA256SUMS --pattern backend-api.json

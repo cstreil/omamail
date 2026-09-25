@@ -106,8 +106,8 @@ if ($Version) {
     $RequestedVersion = $ManifestVersion
 }
 if ($ReleasedBackend) {
-    $Api = Get-Content -LiteralPath (Join-Path $RepoRoot 'backend-api.json') -Raw | ConvertFrom-Json
-    if ([int]$Api.apiVersion -ne ([int]$Api.releasedApiVersion + 1)) {
+    $Api = Get-Content -LiteralPath (Join-Path $RepoRoot 'backend-api.json') -Raw | ConvertFrom-Json -AsHashtable
+    if ([int]($Api['apiVersion']) -ne ([int]($Api['releasedApiVersion']) + 1)) {
         throw '-ReleasedBackend requires exactly one unreleased API step'
     }
     $Pin = (Get-Content -LiteralPath (Join-Path $RepoRoot 'backend-version') -Raw).Trim()
