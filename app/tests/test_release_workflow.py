@@ -9,6 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/release.yml"
 CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
+NATIVE_WORKFLOW = ROOT / ".github/workflows/native-credentials.yml"
 PUBLISH = ROOT / "scripts/publish-backend.sh"
 
 APP_JOBS = {
@@ -16,13 +17,6 @@ APP_JOBS = {
     "app-linux-x86_64": ("ubuntu-22.04", "omamail-app-linux-x86_64.tar.gz"),
     "app-windows-x86_64": ("windows-2022", "omamail-app-windows-x86_64.zip"),
 }
-
-CI_APP_JOBS = {
-    "standalone-app-macos": ("macos-15", "macos-aarch64", "omamail-app-macos-aarch64.tar.gz"),
-    "standalone-app-linux": ("ubuntu-22.04", "linux-x86_64", "omamail-app-linux-x86_64.tar.gz"),
-    "standalone-app-windows": ("windows-2022", "windows-x86_64", "omamail-app-windows-x86_64.zip"),
-}
-
 
 def job_block(source, name):
     match = re.search(rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [a-zA-Z0-9_-]+:\n|\Z)", source)
@@ -36,6 +30,7 @@ class ReleaseWorkflowContract(unittest.TestCase):
     def setUpClass(cls):
         cls.workflow = WORKFLOW.read_text()
         cls.ci_workflow = CI_WORKFLOW.read_text()
+        cls.native_workflow = NATIVE_WORKFLOW.read_text()
         cls.publish = PUBLISH.read_text()
 
     def test_native_jobs_use_fixed_runners_and_publish_exact_assets(self):
@@ -102,45 +97,35 @@ class ReleaseWorkflowContract(unittest.TestCase):
                     self.assertIn("package-release.sh", block)
                     self.assertIn('--host "$PWD/build/app/omamail-app"', block)
 
-    def test_pull_requests_build_and_exercise_each_production_standalone_archive(self):
-        forbidden = ("gh release create", "gh release edit", "publish-backend.sh")
-        for job, (runner, target, archive) in CI_APP_JOBS.items():
+    def test_pull_requests_only_run_linux_plugin_and_backend_contracts(self):
+        for job in ("standalone-backend", "standalone-app-macos", "standalone-app-linux", "standalone-app-windows"):
             with self.subTest(job=job):
-                block = job_block(self.ci_workflow, job)
-                self.assertIn(f"runs-on: {runner}", block)
-                self.assertIn("--no-default-features --features standalone", block)
-                self.assertIn("cmake -S app", block)
-                self.assertIn("ctest --test-dir", block)
-                self.assertIn("-input app/tests/qml/tst_host_contract.qml", block)
-                self.assertIn("QT_QUICK_CONTROLS_STYLE: Omamail", block)
-                self.assertIn("QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic", block)
-                self.assertIn("-import app/qml/styles", block)
-                self.assertIn("test_backend_api.py", block)
-                self.assertIn("--standalone", block)
-                self.assertIn("--check-resources", block)
-                self.assertIn("--smoke-test", block)
-                self.assertIn(archive, block)
-                if target == "windows-x86_64":
-                    self.assertEqual(block.count("QT_QPA_PLATFORM: offscreen"), 1)
-                    self.assertEqual(block.count("QT_QPA_PLATFORM: windows"), 1)
-                    self.assertIn("package-release.ps1", block)
-                    self.assertNotRegex(block, r"(?i)\$host\s*=")
-                    self.assertIn("& $appExecutable --smoke-test", block)
-                    self.assertIn("Test-Package.ps1", block)
-                    self.assertIn("Test-Install.ps1", block)
-                    self.assertIn('-G "Visual Studio 17 2022" -A x64', block)
-                    self.assertIn("cmake --build build/app --config Release", block)
-                    self.assertIn("ctest --test-dir build/app -C Release", block)
-                    self.assertIn("-HostBinary build/app/Release/omamail-app.exe", block)
-                elif target == "macos-aarch64":
-                    self.assertEqual(block.count("QT_QPA_PLATFORM: offscreen"), 1)
-                    self.assertEqual(block.count("QT_QPA_PLATFORM: cocoa"), 1)
-                else:
-                    self.assertIn(f"package-release.sh {target}", block)
-                    self.assertIn("test_package.py", block)
-                    self.assertIn("test_install.sh", block)
-                for command in forbidden:
-                    self.assertNotIn(command, block)
+                self.assertNotRegex(self.ci_workflow, rf"(?m)^  {re.escape(job)}:$")
+        self.assertNotIn("macos-", self.ci_workflow)
+        self.assertNotIn("windows-", self.ci_workflow)
+        portable = job_block(self.ci_workflow, "portable-tests")
+        self.assertIn("make test-rust test-js test-shell-portable", portable)
+        unreleased = job_block(self.ci_workflow, "unreleased-api")
+        self.assertIn("cargo build --locked --bin omamail", unreleased)
+        self.assertIn("test_backend_api.py --binary target/debug/omamail", unreleased)
+        published = job_block(self.ci_workflow, "published-assets")
+        self.assertIn("check-api --published", published)
+        required = job_block(self.ci_workflow, "published-backend")
+        self.assertIn("needs: [published-assets, unreleased-api]", required)
+        self.assertIn("if: always()", required)
+        credentials = job_block(self.native_workflow, "credentials")
+        self.assertIn("runs-on: ubuntu-22.04", credentials)
+        self.assertIn("cargo test --locked --lib credentials", credentials)
+        self.assertNotIn("--features standalone", credentials)
+        self.assertNotIn("macos-", credentials)
+        self.assertNotIn("windows-", credentials)
+
+    def test_legacy_cross_platform_release_is_blocked_before_checkout_or_credentials(self):
+        prepare = job_block(self.workflow, "prepare")
+        preflight = "Refuse legacy standalone release in Omarchy-only fork"
+        self.assertEqual(prepare.count(preflight), 1)
+        self.assertLess(prepare.index(preflight), prepare.index("- uses: actions/checkout@"))
+        self.assertIn("exit 1", prepare.split("- uses: actions/checkout@", 1)[0])
 
     def test_every_build_is_required_before_the_only_publisher_can_pin(self):
         publish = job_block(self.workflow, "publish-and-pin")
@@ -203,10 +188,11 @@ class ReleaseWorkflowContract(unittest.TestCase):
         self.assertLess(public_download, pin)
         self.assertGreaterEqual(self.publish.count("package-backend.py verify-release"), 2)
 
-    def test_contract_itself_is_a_pull_request_and_release_gate(self):
+    def test_legacy_contract_is_opt_in_and_not_plugin_pull_request_ci(self):
         command = "python3 app/tests/test_release_workflow.py"
         self.assertIn(command, self.workflow)
-        self.assertIn(command, self.ci_workflow)
+        self.assertIn(command, (ROOT / "Makefile").read_text())
+        self.assertNotIn(command, self.ci_workflow)
 
 
 if __name__ == "__main__":
