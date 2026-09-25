@@ -142,6 +142,28 @@ class ReleaseWorkflowContract(unittest.TestCase):
                 for command in forbidden:
                     self.assertNotIn(command, block)
 
+    def test_unreleased_pr_packages_only_the_verified_pinned_standalone_backend(self):
+        for job, (_, target, archive) in CI_APP_JOBS.items():
+            with self.subTest(job=job):
+                block = job_block(self.ci_workflow, job)
+                for required in (
+                    'apiVersion', 'releasedApiVersion',
+                    'package-backend.py pin-version', 'gh release download',
+                    archive, 'SHA256SUMS', 'backend-api.json',
+                    'package-backend.py check-api --published',
+                    f'pinned_standalone_backend.py --target {target}',
+                    'OMAMAIL_CI_RELEASED_BACKEND', '--released',
+                    '--smoke-test', '--standalone',
+                ):
+                    self.assertIn(required, block)
+                self.assertIn('target/release/omamail', block)
+        for job in APP_JOBS:
+            block = job_block(self.workflow, job)
+            self.assertNotIn('pinned_standalone_backend.py', block)
+            self.assertNotIn('OMAMAIL_CI_RELEASED_BACKEND', block)
+            self.assertNotIn('ReleasedBackend', block)
+            self.assertNotIn('--released-backend', block)
+
     def test_every_build_is_required_before_the_only_publisher_can_pin(self):
         publish = job_block(self.workflow, "publish-and-pin")
         for dependency in ("prepare", "build", *APP_JOBS):

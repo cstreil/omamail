@@ -4,7 +4,7 @@ set -eu
 usage() {
   printf '%s\n' \
     'Usage: app/scripts/package-release.sh <macos-aarch64|linux-x86_64> [options]' \
-    'Options: --host PATH --backend PATH --qml DIR --ui DIR --manifest PATH --dist DIR --qt-bin DIR'
+    'Options: --host PATH --backend PATH --qml DIR --ui DIR --manifest PATH --dist DIR --qt-bin DIR --released-backend'
 }
 
 [ "$#" -ge 1 ] || { usage >&2; exit 2; }
@@ -22,6 +22,7 @@ dist=${OMAMAIL_DIST:-"$repo_root/dist"}
 qt_bin=${OMAMAIL_QT_BIN:-}
 platform_plugin=${OMAMAIL_PLATFORM_PLUGIN:-}
 test_layout=0
+released_backend=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -34,6 +35,7 @@ while [ "$#" -gt 0 ]; do
     --qt-bin) qt_bin=${2:?missing --qt-bin value}; shift 2 ;;
     --platform-plugin) platform_plugin=${2:?missing --platform-plugin value}; shift 2 ;;
     --test-layout) test_layout=1; shift ;;
+    --released-backend) released_backend=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) printf 'unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -48,6 +50,11 @@ version=$(sed -n '/^\[package\]/,/^\[/s/^version[[:space:]]*=[[:space:]]*"\([^"]
 [ -n "$version" ] || { printf 'Cargo.toml has no package version\n' >&2; exit 1; }
 manifest_version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$manifest")
 [ "$manifest_version" = "$version" ] || { printf 'manifest version %s does not match Cargo version %s\n' "$manifest_version" "$version" >&2; exit 1; }
+if [ "$released_backend" -eq 1 ]; then
+  python3 -c 'import json,sys; c=json.load(open(sys.argv[1],encoding="utf-8")); sys.exit(0 if c["apiVersion"] == c["releasedApiVersion"] + 1 else "--released-backend requires exactly one unreleased API step")' "$repo_root/backend-api.json"
+  pin=$(python3 "$repo_root/scripts/package-backend.py" pin-version)
+  [ "$pin" = "$version" ] || { printf 'published standalone backend pin %s differs from app version %s\n' "$pin" "$version" >&2; exit 1; }
+fi
 [ -x "$host" ] || { printf 'standalone host is missing or not executable: %s\n' "$host" >&2; exit 1; }
 [ -x "$backend" ] || { printf 'backend is missing or not executable: %s\n' "$backend" >&2; exit 1; }
 [ -f "$qml/Main.qml" ] || { printf 'standalone QML is missing: %s/Main.qml\n' "$qml" >&2; exit 1; }
@@ -282,8 +289,13 @@ if [ "$test_layout" -eq 0 ]; then
   [ -s "$ready" ] || { printf 'standalone smoke test did not write readiness metadata\n' >&2; exit 1; }
   backend_version=$($packaged_backend --version)
   [ "$backend_version" = "omamail $version" ] || { printf 'bundled backend version mismatch: %s\n' "$backend_version" >&2; exit 1; }
+  if [ "$released_backend" -eq 1 ]; then
+    set -- --released
+  else
+    set --
+  fi
   HOME="$isolated" XDG_CONFIG_HOME="$isolated/config" XDG_CACHE_HOME="$isolated/cache" XDG_STATE_HOME="$isolated/state" \
-    python3 "$repo_root/tests/test_backend_api.py" --standalone \
+    python3 "$repo_root/tests/test_backend_api.py" --standalone "$@" \
       --binary "$packaged_backend" --expected-version "$version"
 fi
 

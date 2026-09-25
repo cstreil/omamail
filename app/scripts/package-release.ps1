@@ -11,6 +11,7 @@ param(
     [string]$WindeployQt = "windeployqt.exe",
     [string]$Python = "python.exe",
     [string]$BackendApiTest = "tests\test_backend_api.py",
+    [switch]$ReleasedBackend,
     [switch]$SyntheticTestMode
 )
 
@@ -104,6 +105,16 @@ if ($Version) {
 } else {
     $RequestedVersion = $ManifestVersion
 }
+if ($ReleasedBackend) {
+    $Api = Get-Content -LiteralPath (Join-Path $RepoRoot 'backend-api.json') -Raw | ConvertFrom-Json
+    if ([int]$Api.apiVersion -ne ([int]$Api.releasedApiVersion + 1)) {
+        throw '-ReleasedBackend requires exactly one unreleased API step'
+    }
+    $Pin = (Get-Content -LiteralPath (Join-Path $RepoRoot 'backend-version') -Raw).Trim()
+    if ($Pin -cne $RequestedVersion) {
+        throw "published standalone backend pin $Pin differs from app version $RequestedVersion"
+    }
+}
 
 if (-not $SyntheticTestMode -and -not (Get-Command $WindeployQt -ErrorAction SilentlyContinue)) {
     throw "windeployqt is required for a production Windows package"
@@ -186,8 +197,10 @@ try {
         if ($LASTEXITCODE -ne 0 -or $BackendVersion -cne "omamail $RequestedVersion") {
             throw "packaged backend version does not match $RequestedVersion"
         }
+        $ContractArgs = @('--standalone')
+        if ($ReleasedBackend) { $ContractArgs += '--released' }
         & $Python $BackendApiTestPath --binary $SmokeBackend --expected-version $RequestedVersion `
-            --standalone
+            @ContractArgs
         if ($LASTEXITCODE -ne 0) { throw "packaged backend API test failed" }
     }
     $Succeeded = $true

@@ -53,6 +53,24 @@ jobs:
           aqtversion: "==3.3.0"
           py7zrversion: "==1.0.0"
       - run: python3 -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
+      - name: Pair unreleased source with the verified published standalone backend
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mode=$(python3 -c 'import json,sys; d=json.load(open("backend-api.json",encoding="utf-8")); delta=d["apiVersion"]-d["releasedApiVersion"]; print("released" if delta else "source") if delta in (0,1) else sys.exit("invalid source API revision")')
+          if [ "$mode" = released ]; then
+            version=$(python3 scripts/package-backend.py pin-version)
+            mkdir -p published
+            gh release download "v$version" --dir published --pattern omamail-app-macos-aarch64.tar.gz --pattern SHA256SUMS --pattern backend-api.json
+            python3 scripts/package-backend.py check-api --published published/backend-api.json
+            python3 app/scripts/pinned_standalone_backend.py --target macos-aarch64 --archive published/omamail-app-macos-aarch64.tar.gz --checksums published/SHA256SUMS --output "$PWD/published/omamail"
+            echo "OMAMAIL_CI_STANDALONE_BACKEND=$PWD/published/omamail" >> "$GITHUB_ENV"
+            echo "OMAMAIL_CI_RELEASED_BACKEND=1" >> "$GITHUB_ENV"
+          else
+            echo "OMAMAIL_CI_STANDALONE_BACKEND=$PWD/target/release/omamail" >> "$GITHUB_ENV"
+            echo "OMAMAIL_CI_RELEASED_BACKEND=0" >> "$GITHUB_ENV"
+          fi
       - name: Build and test the standalone host
         env:
           QT_QPA_PLATFORM: offscreen
@@ -63,7 +81,7 @@ jobs:
           version="$(python3 scripts/package-backend.py check)"
           cargo test --locked --no-default-features --features standalone,integration-test-credentials
           cargo build --release --locked --no-default-features --features standalone
-          cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$PWD/target/release/omamail"
+          cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$OMAMAIL_CI_STANDALONE_BACKEND"
           cmake --build build/app
           ctest --test-dir build/app --output-on-failure
           python3 app/tests/test_qml_inventory.py
@@ -75,7 +93,9 @@ jobs:
         run: |
           set -euo pipefail
           version="$(python3 scripts/package-backend.py check)"
-          bash app/scripts/package-release.sh macos-aarch64 --host "$PWD/build/app/omamail-app" --backend "$PWD/target/release/omamail"
+          bundle_flags=(); test_flags=()
+          if [ "$OMAMAIL_CI_RELEASED_BACKEND" = 1 ]; then bundle_flags+=(--released-backend); test_flags+=(--released); fi
+          bash app/scripts/package-release.sh macos-aarch64 --host "$PWD/build/app/omamail-app" --backend "$OMAMAIL_CI_STANDALONE_BACKEND" "${bundle_flags[@]}"
           python3 app/tests/test_package.py
           bash app/tests/test_install.sh
           mkdir -p "$RUNNER_TEMP/omamail-smoke"
@@ -84,7 +104,7 @@ jobs:
           backend="$RUNNER_TEMP/omamail-smoke/Omamail.app/Contents/MacOS/omamail"
           "$host" --check-resources
           "$host" --smoke-test "$RUNNER_TEMP/omamail-ready.json"
-          python3 tests/test_backend_api.py --binary "$backend" --expected-version "$version" --standalone
+          python3 tests/test_backend_api.py --binary "$backend" --expected-version "$version" --standalone "${test_flags[@]}"
 
   standalone-app-linux:
     name: Standalone app (Linux x86_64, glibc 2.35)
@@ -111,6 +131,24 @@ jobs:
           python3 -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libdbus-1-3 libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 patchelf
+      - name: Pair unreleased source with the verified published standalone backend
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mode=$(python3 -c 'import json,sys; d=json.load(open("backend-api.json",encoding="utf-8")); delta=d["apiVersion"]-d["releasedApiVersion"]; print("released" if delta else "source") if delta in (0,1) else sys.exit("invalid source API revision")')
+          if [ "$mode" = released ]; then
+            version=$(python3 scripts/package-backend.py pin-version)
+            mkdir -p published
+            gh release download "v$version" --dir published --pattern omamail-app-linux-x86_64.tar.gz --pattern SHA256SUMS --pattern backend-api.json
+            python3 scripts/package-backend.py check-api --published published/backend-api.json
+            python3 app/scripts/pinned_standalone_backend.py --target linux-x86_64 --archive published/omamail-app-linux-x86_64.tar.gz --checksums published/SHA256SUMS --output "$PWD/published/omamail"
+            echo "OMAMAIL_CI_STANDALONE_BACKEND=$PWD/published/omamail" >> "$GITHUB_ENV"
+            echo "OMAMAIL_CI_RELEASED_BACKEND=1" >> "$GITHUB_ENV"
+          else
+            echo "OMAMAIL_CI_STANDALONE_BACKEND=$PWD/target/release/omamail" >> "$GITHUB_ENV"
+            echo "OMAMAIL_CI_RELEASED_BACKEND=0" >> "$GITHUB_ENV"
+          fi
       - name: Build and test the standalone host
         env:
           QT_QPA_PLATFORM: offscreen
@@ -121,7 +159,7 @@ jobs:
           version="$(python3 scripts/package-backend.py check)"
           cargo test --locked --no-default-features --features standalone,integration-test-credentials
           cargo build --release --locked --no-default-features --features standalone
-          cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$PWD/target/release/omamail"
+          cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$OMAMAIL_CI_STANDALONE_BACKEND"
           cmake --build build/app
           ctest --test-dir build/app --output-on-failure
           python3 app/tests/test_qml_inventory.py
@@ -133,7 +171,9 @@ jobs:
         run: |
           set -euo pipefail
           version="$(python3 scripts/package-backend.py check)"
-          bash app/scripts/package-release.sh linux-x86_64 --host "$PWD/build/app/omamail-app" --backend "$PWD/target/release/omamail"
+          bundle_flags=(); test_flags=()
+          if [ "$OMAMAIL_CI_RELEASED_BACKEND" = 1 ]; then bundle_flags+=(--released-backend); test_flags+=(--released); fi
+          bash app/scripts/package-release.sh linux-x86_64 --host "$PWD/build/app/omamail-app" --backend "$OMAMAIL_CI_STANDALONE_BACKEND" "${bundle_flags[@]}"
           python3 app/tests/test_package.py
           bash app/tests/test_install.sh
           mkdir -p "$RUNNER_TEMP/omamail-smoke"
@@ -142,7 +182,7 @@ jobs:
           backend="$RUNNER_TEMP/omamail-smoke/omamail.app/bin/omamail"
           "$host" --check-resources
           "$host" --smoke-test "$RUNNER_TEMP/omamail-ready.json"
-          python3 tests/test_backend_api.py --binary "$backend" --expected-version "$version" --standalone
+          python3 tests/test_backend_api.py --binary "$backend" --expected-version "$version" --standalone "${test_flags[@]}"
 
   standalone-app-windows:
     name: Standalone app (Windows x86_64)
@@ -165,6 +205,32 @@ jobs:
           py7zrversion: "==1.0.0"
       - shell: pwsh
         run: python -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
+      - name: Pair unreleased source with the verified published standalone backend
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $api = Get-Content backend-api.json -Raw | ConvertFrom-Json
+          if ([int]$api.apiVersion -ne [int]$api.releasedApiVersion -and
+              [int]$api.apiVersion -ne ([int]$api.releasedApiVersion + 1)) {
+              throw 'invalid source API revision'
+          }
+          if ([int]$api.apiVersion -gt [int]$api.releasedApiVersion) {
+              $version = python scripts/package-backend.py pin-version
+              New-Item -ItemType Directory -Force published | Out-Null
+              gh release download "v$version" --dir published --pattern omamail-app-windows-x86_64.zip --pattern SHA256SUMS --pattern backend-api.json
+              if ($LASTEXITCODE -ne 0) { throw 'published standalone release download failed' }
+              python scripts/package-backend.py check-api --published published/backend-api.json
+              if ($LASTEXITCODE -ne 0) { throw 'published API contract mismatch' }
+              python app/scripts/pinned_standalone_backend.py --target windows-x86_64 --archive published/omamail-app-windows-x86_64.zip --checksums published/SHA256SUMS --output "$PWD/published/omamail.exe"
+              if ($LASTEXITCODE -ne 0) { throw 'published standalone backend verification failed' }
+              Add-Content -Path $env:GITHUB_ENV -Value "OMAMAIL_CI_STANDALONE_BACKEND=$PWD/published/omamail.exe"
+              Add-Content -Path $env:GITHUB_ENV -Value 'OMAMAIL_CI_RELEASED_BACKEND=1'
+          } else {
+              Add-Content -Path $env:GITHUB_ENV -Value "OMAMAIL_CI_STANDALONE_BACKEND=$PWD/target/release/omamail.exe"
+              Add-Content -Path $env:GITHUB_ENV -Value 'OMAMAIL_CI_RELEASED_BACKEND=0'
+          }
       - name: Build and test the standalone host
         shell: pwsh
         env:
@@ -176,13 +242,14 @@ jobs:
           $version = python scripts/package-backend.py check
           cargo build --release --locked --no-default-features --features standalone
           if ($LASTEXITCODE -ne 0) { throw "standalone backend build failed" }
-          cmake -S app -B build/app -G "Visual Studio 17 2022" -A x64 -DOMAMAIL_BACKEND="$PWD/target/release/omamail.exe"
+          cmake -S app -B build/app -G "Visual Studio 17 2022" -A x64 -DOMAMAIL_BACKEND="$env:OMAMAIL_CI_STANDALONE_BACKEND"
           if ($LASTEXITCODE -ne 0) { throw "Qt configuration failed" }
           cmake --build build/app --config Release
           if ($LASTEXITCODE -ne 0) { throw "Qt build failed" }
           ctest --test-dir build/app -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "Qt tests failed" }
           python app/tests/test_qml_inventory.py
+          if ($LASTEXITCODE -ne 0) { throw "QML inventory failed" }
           qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
           if ($LASTEXITCODE -ne 0) { throw "QML tests failed" }
           python tests/test_backend_api.py --binary target/release/omamail.exe --expected-version $version --standalone
@@ -194,7 +261,10 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $version = python scripts/package-backend.py check
-          & app/scripts/package-release.ps1 -HostBinary build/app/Release/omamail-app.exe -Backend target/release/omamail.exe
+          $released = $env:OMAMAIL_CI_RELEASED_BACKEND -eq '1'
+          $contractFlags = @()
+          if ($released) { $contractFlags += '--released' }
+          & app/scripts/package-release.ps1 -HostBinary build/app/Release/omamail-app.exe -Backend $env:OMAMAIL_CI_STANDALONE_BACKEND -ReleasedBackend:$released
           if ($LASTEXITCODE -ne 0) { throw "Windows package failed" }
           & app/tests/Test-Package.ps1
           & app/tests/Test-Install.ps1
@@ -206,7 +276,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "resource check failed" }
           & $appExecutable --smoke-test (Join-Path $env:RUNNER_TEMP "omamail-ready.json")
           if ($LASTEXITCODE -ne 0) { throw "live smoke failed" }
-          python tests/test_backend_api.py --binary $backend --expected-version $version --standalone
+          python tests/test_backend_api.py --binary $backend --expected-version $version --standalone @contractFlags
           if ($LASTEXITCODE -ne 0) { throw "packaged backend API contract failed" }
 
   portable-tests:
@@ -223,6 +293,7 @@ jobs:
       - run: make test-rust test-js test-shell-portable
       - run: python3 tests/test_backend_release.py
       - run: python3 app/tests/test_release_workflow.py
+      - run: python3 app/tests/test_pinned_standalone_backend.py
       - run: python3 scripts/package-backend.py check-api
       - run: git diff --check
       - name: Leave a note for the PR comment when this gate fails

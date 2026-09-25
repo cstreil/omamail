@@ -105,6 +105,17 @@ binary does not have yet. The contract names that difference and nothing more:
   it with `backend_needs_update` (code -32012) — so a feature that forgot to
   look before asking fails the way it already handles, never as a request the old
   binary would misread. `Service.backendNeedsUpdate` is an overall update indicator, not a per-feature gate. A feature checks the connected backend against the fixed API revision that introduced it: event suggestions use `Service.backendCanSuggestEvents`, true only for a ready backend with API 2 or newer. That requirement remains correct before release, after the pin advances, and when a later unrelated API is introduced.
+- The three **PR standalone-app CI jobs** build and contract-test the source backend
+  independently. While source is one unreleased step ahead, they package the
+  current host with the **checksummed published standalone backend for the exact
+  pin and platform**, not the source backend or a plugin binary. They require
+  its released API fixtures and an actual packaged host/backend smoke handshake;
+  this keeps the API-5 standalone UI paired with API 5 without changing QML.
+  With no unreleased step they package the tested source backend as before.
+  The release workflow does **not** use this PR-only pairing: it packages its
+  newly built backend and must fail the live smoke check until the standalone
+  host and UI explicitly support the new API. A green PR is not permission to
+  ship a standalone app with an unreleased backend.
 - `tests/test_source.sh` permits calls only to declared backend methods. QML regression tests exercise fixed feature requirements across connected API versions and changing release metadata; a release must not require deleting compatibility checks from QML.
 - The pin commit made by a release folds the step: `releasedApiVersion` becomes
   `apiVersion`, both `unreleased` lists empty. Published contracts from before
