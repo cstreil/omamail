@@ -156,7 +156,7 @@ function storageSnapshot(directory = process.env.HOME) {
     if (emptyRegistry) fs.writeFileSync(registryPath, JSON.stringify({version:1,accounts:[]}));
     // The full isolated HOME includes seeded cache/config/state sentinels,
     // credential helper effects and any newly created outbox/draft files.
-    const noWrites = fixture.method.startsWith('mail.') || fixture.name === 'recovery rejects invalid edit history';
+    const noWrites = fixture.method.startsWith('mail.') || fixture.method.startsWith('contacts.') || fixture.name === 'recovery rejects invalid edit history';
     const before = noWrites ? storageSnapshot() : null;
     const value = await call(fixture.method, fixture.params, fixture.errorCode === undefined ? null : fixture.errorCode);
     if (noWrites) assert.deepEqual(storageSnapshot(), before, fixture.name + ': no storage or credential effects');
@@ -175,6 +175,13 @@ function storageSnapshot(directory = process.env.HOME) {
     if (fixture.name === 'recovery reads edit history')
       assert.equal(value.record.parked[1].userModified, undefined, 'legacy edit history remains absent');
   }
+
+  // API 5's parameterless suggestion call remains local-only and read-only in
+  // both the pinned published binary and the unreleased API 6 backend.
+  const contactsBefore = storageSnapshot();
+  const localContacts = await call('contacts.suggest', {});
+  assert.ok(Array.isArray(localContacts), 'legacy contacts.suggest returns an array');
+  assert.deepEqual(storageSnapshot(), contactsBefore, 'legacy contact suggestions have no effects');
 
   await call('message.parse', {raw:17}, -32602);
   const providers = await call('providers.snapshot');

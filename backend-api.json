@@ -1,5 +1,5 @@
 {
-  "apiVersion": 5,
+  "apiVersion": 6,
   "releasedApiVersion": 5,
   "protocolVersion": 1,
   "methods": [
@@ -88,6 +88,9 @@
     "cache.calendarRead",
     "cache.calendarPut",
     "contacts.suggest",
+    "contacts.sources",
+    "contacts.list",
+    "contacts.detail",
     "attachment.read",
     "attachment.store",
     "attachment.storeUpload",
@@ -759,10 +762,69 @@
       "types": {
         "ticket": "string"
       }
+    },
+    {
+      "name": "contact suggestions reject unknown parameters",
+      "method": "contacts.suggest",
+      "params": {"unexpected": true},
+      "errorCode": -32602
+    },
+    {
+      "name": "account-scoped contact suggestions require a registered account",
+      "method": "contacts.suggest",
+      "params": {"accountId": "jmap:missing@example.test"},
+      "errorCode": -32000,
+      "equals": {"message": "contacts_account_unknown"}
+    },
+    {
+      "name": "contact sources for a non-JMAP account are empty",
+      "method": "contacts.sources",
+      "params": {"accountId": "imap:sender@example.org"},
+      "equals": {"sources": []}
+    },
+    {
+      "name": "contact sources reject unknown parameters",
+      "method": "contacts.sources",
+      "params": {"accountId": "imap:sender@example.org", "extra": true},
+      "errorCode": -32602
+    },
+    {
+      "name": "contact lists reject malformed source identifiers",
+      "method": "contacts.list",
+      "params": {"accountId": "jmap:missing@example.test", "source": "bad\nsource"},
+      "errorCode": -32602
+    },
+    {
+      "name": "contact lists for non-JMAP accounts are empty",
+      "method": "contacts.list",
+      "params": {"accountId": "imap:sender@example.org", "source": "book", "limit": 0},
+      "equals": {"contacts": [], "total": 0, "position": 0}
+    },
+    {
+      "name": "contact details refuse non-JMAP accounts",
+      "method": "contacts.detail",
+      "params": {"accountId": "imap:sender@example.org", "id": "contact-1"},
+      "errorCode": -32000,
+      "equals": {"message": "contacts_not_supported"}
+    },
+    {
+      "name": "contact details reject malformed IDs before account lookup",
+      "method": "contacts.detail",
+      "params": {"accountId": "jmap:missing@example.test", "id": "bad\ncontact"},
+      "errorCode": -32602
     }
   ],
   "unreleased": {
-    "methods": [],
-    "cases": []
+    "methods": ["contacts.sources", "contacts.list", "contacts.detail"],
+    "cases": [
+      "contact suggestions reject unknown parameters",
+      "account-scoped contact suggestions require a registered account",
+      "contact sources for a non-JMAP account are empty",
+      "contact sources reject unknown parameters",
+      "contact lists reject malformed source identifiers",
+      "contact lists for non-JMAP accounts are empty",
+      "contact details refuse non-JMAP accounts",
+      "contact details reject malformed IDs before account lookup"
+    ]
   }
 }

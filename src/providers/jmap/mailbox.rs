@@ -525,6 +525,20 @@ impl Session {
         calls: Value,
         submission: bool,
     ) -> Result<Value, &'static str> {
+        let using = if submission {
+            json!([CORE, MAIL, SUBMISSION])
+        } else {
+            json!([CORE, MAIL])
+        };
+        self.api_using(context, snapshot, calls, using).await
+    }
+    pub(super) async fn api_using(
+        &self,
+        context: &Context,
+        snapshot: &Snapshot,
+        calls: Value,
+        using: Value,
+    ) -> Result<Value, &'static str> {
         active(context)?;
         let _slot = snapshot
             .slots
@@ -532,11 +546,6 @@ impl Session {
             .await
             .map_err(|_| "session_failed")?;
         active(context)?;
-        let using = if submission {
-            json!([CORE, MAIL, SUBMISSION])
-        } else {
-            json!([CORE, MAIL])
-        };
         let result = self
             .document(
                 "call",
@@ -566,7 +575,18 @@ impl Session {
                 .or_else(|| response[1].get("state"));
             let kind = method.split('/').next().unwrap_or("");
             if let Some(state) = state.filter(|v| v.is_string())
-                && ["Email", "Mailbox", "Thread", "Identity", "EmailSubmission"].contains(&kind)
+                && [
+                    "Email",
+                    "Mailbox",
+                    "Thread",
+                    "Identity",
+                    "EmailSubmission",
+                    "AddressBook",
+                    "ContactCard",
+                    "Calendar",
+                    "CalendarEvent",
+                ]
+                .contains(&kind)
             {
                 if state.as_str().is_some_and(|v| v.len() > 4096) {
                     return Err("jmap_response_too_large");

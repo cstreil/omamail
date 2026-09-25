@@ -1,4 +1,4 @@
-//! Bounded, read-only contact discovery. No subprocesses or network access.
+//! Bounded local contact discovery and normalization. No subprocesses or network access.
 use serde_json::{Value, json};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
@@ -231,6 +231,28 @@ pub fn suggest() -> Result<Value, &'static str> {
     ))
 }
 
+pub(crate) fn merge(local: &Value, remote: &Value) -> Result<Value, &'static str> {
+    if !local.is_array() || !remote.is_array() {
+        return Err("contacts_invalid");
+    }
+    let mut book = Book::new();
+    json_book(&mut book, local);
+    json_book(&mut book, remote);
+    Ok(finish(book))
+}
+
+fn finish(book: Book) -> Value {
+    let mut values: Vec<_> = book.into_values().collect();
+    values.sort_by_key(|v| {
+        v["name"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(v["email"].as_str().unwrap_or(""))
+            .to_lowercase()
+    });
+    json!(values)
+}
+
 fn discover(home: &Path, config: &Path, cached: &Path) -> Value {
     let mut book = Book::new();
     for name in [".thunderbird", ".betterbird"] {
@@ -245,15 +267,7 @@ fn discover(home: &Path, config: &Path, cached: &Path) -> Value {
     if let Some(text) = read(&config.join("omamail/contacts.vcf")) {
         vcard(&mut book, &text)
     }
-    let mut values: Vec<_> = book.into_values().collect();
-    values.sort_by_key(|v| {
-        v["name"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .unwrap_or(v["email"].as_str().unwrap_or(""))
-            .to_lowercase()
-    });
-    json!(values)
+    finish(book)
 }
 #[cfg(test)]
 mod tests {
@@ -308,6 +322,24 @@ mod tests {
         collect(&mut b, "Alice", "a@example.com");
         assert_eq!(b.len(), 1);
         assert_eq!(b["a@example.com"]["name"], "Alice");
+    }
+    #[test]
+    fn merges_local_and_remote_suggestions_without_duplicate_addresses() {
+        let merged = merge(
+            &json!([{"name":"","email":"Alice@example.com"}]),
+            &json!([
+                {"name":"Alice","email":"alice@example.com"},
+                {"name":"Bob","email":"bob@example.com"}
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            merged,
+            json!([
+                {"name":"Alice","email":"alice@example.com"},
+                {"name":"Bob","email":"bob@example.com"}
+            ])
+        );
     }
 }
 
