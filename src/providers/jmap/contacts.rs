@@ -1041,6 +1041,11 @@ mod tests {
         assert_eq!(page["contacts"][1]["name"], "Bob");
         assert_eq!(page["contacts"][1]["emails"].as_array().unwrap().len(), 1);
         assert!(!page.to_string().contains("synthetic-secret"));
+        let zero = session
+            .contact_list(&account, "book", "", 0, 1)
+            .await
+            .unwrap();
+        assert_eq!(zero, json!({"contacts":[],"total":2,"position":1}));
 
         let searched = session
             .contact_list(&account, "book", "zzz-no-match", 50, 0)
