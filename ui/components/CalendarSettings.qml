@@ -250,6 +250,7 @@ Column {
           objectName: "calendar-source-detail"
           width: parent.width
           text: root.sourceDetail(modelData)
+          textFormat: Text.PlainText
           color: root.dimColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption
