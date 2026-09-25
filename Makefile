@@ -113,8 +113,6 @@ backend:
 # The parsing, formatting, and decision rules live in plain JS precisely so
 # they can be tested without a compositor. These run anywhere node does.
 test-js:
-	node app/tests/test_theme.js
-	node app/tests/test_shell_theme.js
 	node ui/tests/test_backend_wire.js
 	node ui/tests/test_backend_compatibility.js
 	node ui/tests/test_backend_runtime.js
@@ -165,17 +163,24 @@ test-js:
 	node ui/tests/test_jmap_helpers.js
 	node ui/tests/test_hey.js
 
+# Retain upstream-derived desktop contracts only for explicit legacy review;
+# neither CI nor the default Omarchy validation executes this target.
+test-legacy-app:
+	node app/tests/test_theme.js
+	node app/tests/test_shell_theme.js
+	python3 tests/test_app_make.py
+	python3 app/tests/test_release_workflow.py
+
 test-shell: test-shell-portable test-shell-libcurl
 
 # Everything here drives one of our own scripts against a fake server and
 # asserts what the script did with the answer, so any libcurl can run it.
 test-shell-portable:
-	python3 tests/test_app_make.py
 	python3 tests/test_diagnostics.py
 	python3 tests/test_network_migration.py
 	python3 tests/test_plugin_workflow.py
 	python3 tests/test_backend_runtime.py
-	python3 tests/test_backend_release.py
+	python3 tests/test_backend_api_policy.py
 	python3 tests/test_runtime_release_contract.py
 	sh tests/test_dev.sh
 	python3 tests/test_attachment_common.py
@@ -200,6 +205,11 @@ test-shell-portable:
 	bash tests/test_calendar_transport.sh
 	bash tests/test_calendar_write.sh
 	bash tests/test_calendar_delete.sh
+
+# The inherited release publisher is disabled. Keep its synthetic contracts
+# available for an explicit future review, never as the plugin's default CI.
+test-legacy-release: test-legacy-app
+	python3 tests/test_backend_release.py
 	bash tests/test_release_notes.sh
 	bash tests/test_publish.sh
 	python3 tests/test_publish_backend.py
@@ -268,9 +278,10 @@ bench:
 # Needs the Omarchy shell's qs.Commons / qs.Ui on the import path.
 qml-check:
 	$(QMLLINT) -I /usr/share/omarchy/shell $(QML_FILES)
-	$(QMLLINT) -I app/qml/imports -I "$(APP_BUILD_DIR)/qml" $(APP_QML_FILES)
 
-validate: test test-app-qml qml-check
+# The supported fork product is the Omarchy plugin, not the standalone Qt app.
+# Legacy app targets remain opt-in but cannot block plugin validation.
+validate: test qml-check
 	omarchy plugin validate .
 	git diff --check
 

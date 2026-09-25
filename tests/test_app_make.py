@@ -48,7 +48,8 @@ cmake = (ROOT / "app/CMakeLists.txt").read_text()
 assert 'ui/assets/*' in cmake
 
 makefile = (ROOT / "Makefile").read_text()
-assert "validate: test test-app-qml qml-check" in makefile
+assert "validate: test qml-check" in makefile
+assert "validate: test test-app-qml" not in makefile
 assert 'test-app-qml:\n\t@test -n "$(QMLTESTRUNNER)"' in makefile
 
 # CMake may not independently find Qt's runner outside PATH. Forward the
@@ -57,7 +58,8 @@ qml = make("-n", "test-app-qml", "QMLTESTRUNNER=/synthetic/qt/bin/qmltestrunner"
 assert '-DQMLTESTRUNNER_EXECUTABLE="/synthetic/qt/bin/qmltestrunner"' in qml
 assert '--no-tests=error' in qml
 lint = make("-n", "qml-check")
-assert f'-I "{APP_BUILD_ARG}/qml"' in lint
+assert "-I /usr/share/omarchy/shell" in lint
+assert f'-I "{APP_BUILD_ARG}/qml"' not in lint
 
 # Relative overrides must be anchored to the checkout before CMake reads the
 # backend path, and app-run must launch the binary in the external build tree.

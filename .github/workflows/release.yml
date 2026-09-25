@@ -22,6 +22,13 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       branch: ${{ steps.version.outputs.branch }}
     steps:
+      # The inherited publisher would build macOS/Windows/Linux standalone apps,
+      # which are not products of this Omarchy/Quickshell-plugin-only fork.
+      # A reviewed Linux plugin publisher must replace this guard before any release.
+      - name: Refuse legacy standalone release in Omarchy-only fork
+        run: |
+          echo '::error::Legacy standalone publisher disabled for the Omarchy-only fork; obtain separate approval for a Linux plugin release.'
+          exit 1
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
       - id: version
         env:
