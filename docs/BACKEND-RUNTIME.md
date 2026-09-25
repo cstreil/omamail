@@ -1,5 +1,16 @@
 # Backend runtimes and releases
 
+> **Personal-fork scope (2026-09-25):** The supported product here is the
+> Omarchy/Quickshell plugin with its Linux backend, **not** the standalone Qt
+> app on any platform. Pull-request CI exercises the Linux plugin/backend
+> contracts only; `make validate` excludes the opt-in standalone host tests.
+> The inherited multi-platform Release workflow is intentionally **fail-closed**
+> at its first step, before checkout or credentials. The legacy standalone
+> release instructions below describe the disabled upstream-derived pipeline,
+> not an available fork release procedure. Do not run `make publish`, advance
+> `backend-version`, change installers, or ship API 6 until a separate, reviewed
+> Omarchy-plugin-only release process is explicitly authorized.
+
 ## Omarchy plugin-owned backend
 
 Omarchy's Plugin Marketplace owns the checkout and its UI. Omamail keeps exactly
@@ -110,9 +121,13 @@ binary does not have yet. The contract names that difference and nothing more:
   `apiVersion`, both `unreleased` lists empty. Published contracts from before
   the split are read as all released.
 
-## Release before pin
+## Release before pin (legacy workflow; disabled in this fork)
 
-Run `make publish VERSION=MAJOR.MINOR.PATCH` on a clean main synchronized with origin. Without `VERSION`, it prepares the next patch version. The command creates `release/X.Y.Z`, prepares Cargo.toml, the omamail Cargo.lock record and manifest.json, and opens one PR targeting main. It pushes only that release branch, then follows its exact Release run. It never pushes main or a tag. `backend-version` and the released API contract stay unchanged during preparation.
+The following describes the inherited design, **not an executable release plan**
+for this Omarchy-only fork. Its Release workflow now fails before any build or
+publication; no release-branch push or manual dispatch is authorized.
+
+Historically, running `make publish VERSION=MAJOR.MINOR.PATCH` on a clean main synchronized with origin. Without `VERSION`, it prepares the next patch version. The command creates `release/X.Y.Z`, prepares Cargo.toml, the omamail Cargo.lock record and manifest.json, and opens one PR targeting main. It pushes only that release branch, then follows its exact Release run. It never pushes main or a tag. `backend-version` and the released API contract stay unchanged during preparation.
 
 A push to `release/**` starts the authoritative Release workflow. Only the exact `release/X.Y.Z` branch matching Cargo's version is accepted; dispatching on main, a feature branch or a tag is refused. The workflow builds both plugin backends and all three standalone archives, creates `vX.Y.Z`, publishes the complete asset set and installers, verifies the public downloads, then commits `backend-version` and the folded API contract on the same release branch. The pin commit changes only those two files, both excluded from the publication push trigger, so it starts PR checks without another publication.
 
