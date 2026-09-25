@@ -240,6 +240,7 @@ Column {
         Text {
           width: parent.width
           text: String(modelData.name || modelData.id || "Calendar")
+          textFormat: Text.PlainText
           color: root.textColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.bodySmall
