@@ -242,6 +242,43 @@ the seven root commands.
 | Delivery and recovery | Durable outbox state, undo deadlines, serial delivery, authoritative cancellation and uncertain-delivery handling; private compose recovery with revision conflicts. | QML parks/restores editor drafts and displays countdowns and status. It never starts delivery from a UI timer. |
 | Sender-controlled URLs | Native public HTTP for remote raster images and unsubscribe, with checked DNS and pinned connections, TLS verification, no redirects, size/deadline bounds and image signature checks. | Native HTML preparation applies the resource policy; QML records the user’s image permission and draws approved raster data. |
 
+### Native JMAP calendar: preparation, not a shipped capability
+
+The calendar row above describes the current Google/Microsoft and CalDAV transports.
+The existing generic `jmap.request` is **not** a typed JMAP calendar reader:
+there are no account-bound `calendar.sources` or `calendar.events` methods for
+JMAP in the released API 5 backend. A future implementation should first target
+read-only calendars of an already configured JMAP **mail** account, resolving its
+independent Calendar capability and primary account. Standalone calendar-only
+JMAP accounts, event creation, edits and deletion are outside this preparation.
+
+Before exposing calendar sources or events, verify `Calendar/get` read-item rights
+and each returned event's true membership in a readable calendar; a query filtered
+by calendar is preferable where supported. Stalwart compatibility may require an
+account-wide `CalendarEvent/query` if a usable calendar filter is unavailable:
+local filtering could then receive other calendars' events. This is a future
+security-review decision, not a shipped transport; assess the additional
+exposure and bound result count, response bytes, pages and deadline before
+adoption. Constrain requested date ranges and account-qualified source IDs;
+reject redirects and foreign credential destinations and suppress credential
+reprobes after 401. Future review must resolve timed-event start/end time zones
+and all-day calendar/time-zone semantics (including DST) without defaulting to
+the host's local zone. Synthetic TLS fixtures must cover malformed/foreign
+calendar IDs, denied rights, pagination, time zones and **no**
+`CalendarEvent/set` or local write effects. The mixed experimental JMAP branch
+is not a safe cherry-pick.
+
+Preserve configured CalDAV collections and keyring entries: an **enabled** DAV
+source keeps conservative account-level precedence; a disabled source remains
+stored but must neither suppress JMAP reads nor become a write fallback. Do not
+silently change either state or migrate events. A later calendar RPC requires its
+own contract fixtures, security review and a permitted API step: the contract may
+be at most one unreleased revision beyond the pinned release (see
+[Released and unreleased](BACKEND-RUNTIME.md#released-and-unreleased-one-step-ahead-of-the-pin)).
+Do not assume API 7 while API 5 is the only published pin. Any calendar UI change
+also needs matched GitHub-hosted synthetic before/after screenshots and hands-on
+light/dark, wide/compact Omarchy review before its PR can be approved or merged.
+
 The official HEY adapter keeps the posting/topic distinction, uses JSON outputs,
 and negotiates optional HTML flags for older installed clients. Account checks
 cannot prevent another application changing HEY's global login between commands.
